@@ -135,6 +135,22 @@ input[type="range"]{width:100%;}
 
 .fine-print{font-size:.72rem;color:var(--ink-faint);font-weight:600;margin-top:12px;line-height:1.6;}
 
+/* 横画面(ランドスケープ)では、カメラ映像と操作パネルを横並びにして映像を大きく確保する */
+@media (orientation: landscape) and (min-width: 640px){
+  #app{max-width:1100px;}
+  body[data-mode="calib"] #app, body[data-mode="measure"] #app{
+    display:grid;
+    grid-template-columns: 1.3fr 1fr;
+    grid-template-areas: "topbar topbar" "stage panel";
+    gap:14px;
+    align-items:start;
+  }
+  body[data-mode="calib"] .topbar, body[data-mode="measure"] .topbar{grid-area:topbar;}
+  body[data-mode="calib"] #stageWrap, body[data-mode="measure"] #stageWrap{grid-area:stage;margin-bottom:0;}
+  body[data-mode="calib"] #panelCalib{grid-area:panel;max-height:calc(100vh - 30px);overflow-y:auto;margin-bottom:0;}
+  body[data-mode="measure"] #panelMeasure{grid-area:panel;max-height:calc(100vh - 30px);overflow-y:auto;margin-bottom:0;}
+}
+
 @media (prefers-reduced-motion: reduce){
   *{animation:none !important;transition:none !important;}
 }
@@ -161,10 +177,15 @@ input[type="range"]{width:100%;}
       <li>「正面/背面」: バックネット越し・投手の後ろなど、ボールがカメラに近づく/遠ざかる形の撮影に対応します(見かけの大きさの変化から速度を計算するため、側面より精度は落ちます)</li>
       <li>ネット越しなど視界を遮る場所からの撮影は精度が下がるためおすすめしません</li>
       <li>キャリブレーションの基準点は、実際の基準位置(距離が分かっている2点)に正確にタップ・調整してください</li>
-      <li>カメラ映像は端末の外へ送信されません</li>
-      <li>この機能はHTTPS配信のページでのみ動作します(file://では起動できません)</li>
+      <li>iPhoneのスロー撮影(120/240fps)で録画した動画を使うと、ライブカメラより高精度に計測できます</li>
+      <li>カメラ映像・動画ファイルは端末の外へ送信されません</li>
+      <li>ライブカメラの利用にはHTTPS配信のページが必要です(file://では起動できません。録画した動画の読み込みはこの制約を受けません)</li>
     </ul>
-    <button id="btnStartCamera" class="btn btn-primary">カメラを起動</button>
+    <div class="btn-row">
+      <button id="btnStartCamera" class="btn btn-primary">カメラを起動</button>
+      <button id="btnPickVideoFile" class="btn btn-ghost">録画した動画を使う</button>
+    </div>
+    <input type="file" id="videoFileInput" accept="video/*" hidden>
     <p id="startError" class="error-text" hidden></p>
   </section>
 
@@ -178,6 +199,12 @@ input[type="range"]{width:100%;}
 
   <section id="panelCalib" class="panel" hidden>
     <p class="lead" id="calibLead">映像上で<b>基準点A</b>と<b>基準点B</b>をタップしてください(実距離が分かっている2点。ピンはドラッグで微調整できます)。</p>
+
+    <div id="fileControls" class="field-row" hidden>
+      <button type="button" id="btnTogglePlay" class="btn btn-ghost btn-sm">再生</button>
+      <input type="range" id="seekInput" min="0" max="1" step="0.001" value="0" style="flex:1 1 160px;">
+      <span class="field-label" id="seekTimeLabel" style="width:auto;">0:00 / 0:00</span>
+    </div>
 
     <div id="calibAxialFields" hidden>
       <p class="axial-caveat">正面/背面モードは、ボールの「写る大きさ」の変化から距離を計算するしくみです。遠くのボールほど小さく写り、誤差が急に大きくなるため、側面モードより精度は落ちます。カメラに近い範囲で計測するほど正確です。</p>
@@ -295,6 +322,12 @@ var el = {
   overlaySvg: document.getElementById("overlaySvg"),
   detectDot: document.getElementById("detectDot"),
   btnStartCamera: document.getElementById("btnStartCamera"),
+  btnPickVideoFile: document.getElementById("btnPickVideoFile"),
+  videoFileInput: document.getElementById("videoFileInput"),
+  fileControls: document.getElementById("fileControls"),
+  btnTogglePlay: document.getElementById("btnTogglePlay"),
+  seekInput: document.getElementById("seekInput"),
+  seekTimeLabel: document.getElementById("seekTimeLabel"),
   startError: document.getElementById("startError"),
   shootModeSeg: document.getElementById("shootModeSeg"),
   calibLead: document.getElementById("calibLead"),
@@ -346,7 +379,8 @@ var state = {
   fpsIntervalId: null,
   running: false,
   usingRVFC: false,
-  session: { readings: [], shootMode: "lateral" },
+  session: { readings: [], shootMode: "lateral", source: "live" },
+  videoFileUrl: null,
   calib: {
     A: null,
     B: null,
@@ -441,6 +475,111 @@ function onVideoMetadata(){
   renderCalibOverlay();
 }
 
+// ---------- 録画した動画ファイルからの計測 ----------
+function startFileSource(file){
+  el.startError.hidden = true;
+  if (state.videoFileUrl){ URL.revokeObjectURL(state.videoFileUrl); }
+  state.session.source = "file";
+  var url = URL.createObjectURL(file);
+  state.videoFileUrl = url;
+  el.video.srcObject = null;
+  el.video.src = url;
+  if (el.video.videoWidth){
+    onVideoMetadata();
+  } else {
+    el.video.addEventListener("loadedmetadata", onVideoMetadata, { once: true });
+  }
+  el.video.play().catch(function(){ /* 自動再生できなくても一時停止のまま操作してもらえばよい */ });
+  el.fileControls.hidden = false;
+  updateSeekUI();
+  showPanel("calib");
+}
+
+el.btnPickVideoFile.addEventListener("click", function(){
+  el.videoFileInput.click();
+});
+el.videoFileInput.addEventListener("change", function(){
+  var file = el.videoFileInput.files[0];
+  if (file) startFileSource(file);
+  el.videoFileInput.value = "";
+});
+el.btnTogglePlay.addEventListener("click", function(){
+  if (el.video.paused){ el.video.play(); } else { el.video.pause(); }
+});
+el.video.addEventListener("play", function(){ el.btnTogglePlay.textContent = "一時停止"; });
+el.video.addEventListener("pause", function(){ el.btnTogglePlay.textContent = "再生"; });
+el.video.addEventListener("timeupdate", function(){
+  if (state.session.source === "file" && document.body.dataset.mode === "calib") updateSeekUI();
+});
+el.seekInput.addEventListener("input", function(){
+  if (!el.video.duration || !isFinite(el.video.duration)) return;
+  el.video.currentTime = parseFloat(el.seekInput.value) * el.video.duration;
+});
+el.video.addEventListener("ended", function(){
+  if (state.session.source !== "file" || !state.running) return;
+  if (state.session.shootMode === "axial" && state.detect.track.length >= MIN_AXIAL_SAMPLES){
+    finalizeAxialReading();
+  }
+  stopMeasureLoop();
+});
+
+function updateSeekUI(){
+  if (!el.video.duration || !isFinite(el.video.duration)){
+    el.seekTimeLabel.textContent = "0:00 / 0:00";
+    return;
+  }
+  el.seekInput.value = el.video.currentTime / el.video.duration;
+  el.seekTimeLabel.textContent = formatTime(el.video.currentTime) + " / " + formatTime(el.video.duration);
+}
+function formatTime(s){
+  s = Math.max(0, s || 0);
+  var m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m + ":" + pad2(sec);
+}
+
+function probeSourceFps(callback){
+  if (!("requestVideoFrameCallback" in HTMLVideoElement.prototype)){ callback(30); return; }
+  var samples = [];
+  function probeCb(now, metadata){
+    samples.push(metadata.mediaTime);
+    if (samples.length < 8){
+      el.video.requestVideoFrameCallback(probeCb);
+      return;
+    }
+    var deltas = [];
+    for (var i = 1; i < samples.length; i++){
+      var d = samples[i] - samples[i - 1];
+      if (d > 0) deltas.push(d);
+    }
+    if (!deltas.length){ callback(30); return; }
+    deltas.sort(function(a, b){ return a - b; });
+    var median = deltas[Math.floor(deltas.length / 2)];
+    callback(median > 0 ? 1 / median : 30);
+  }
+  el.video.requestVideoFrameCallback(probeCb);
+}
+
+// 動画ファイルの実フレームレートを実測し、画面のリフレッシュレートで間引かれない再生速度に自動調整してから計測を開始する
+// (iPhoneのスロー撮影は120/240fpsで記録されるが、そのまま1倍速再生すると画面表示側の間引きでフレームを取りこぼすため)
+function startFileMeasurement(){
+  el.video.pause();
+  el.video.currentTime = 0;
+  el.video.play().then(function(){
+    probeSourceFps(function(fps){
+      state.actualFps = fps;
+      var safeFps = 50;
+      var rate = fps > safeFps ? Math.max(0.15, safeFps / fps) : 1;
+      el.video.playbackRate = rate;
+      el.fpsBadge.textContent = "実測 " + Math.round(fps) + "fps" + (rate < 1 ? "(" + rate.toFixed(2) + "倍速で解析)" : "");
+      el.fpsBadge.hidden = false;
+      el.video.currentTime = 0;
+      startMeasureLoop();
+    });
+  }).catch(function(){
+    startMeasureLoop();
+  });
+}
+
 function refreshFpsBadge(){
   if (!state.stream) return;
   var track = state.stream.getVideoTracks()[0];
@@ -481,6 +620,9 @@ function fitStage(){
   el.stage.style.height = h + "px";
 }
 window.addEventListener("resize", fitStage);
+if (screen.orientation && screen.orientation.addEventListener){
+  screen.orientation.addEventListener("change", fitStage);
+}
 
 // ---------- 撮影アングル(モード)切替 ----------
 var shootModeButtons = Array.prototype.slice.call(el.shootModeSeg.querySelectorAll(".seg-btn"));
@@ -796,6 +938,7 @@ function computeAxialSetup(){
   var canvasH = Math.max(64, Math.round(state.videoH * scale));
   var midX = (A.x + B.x) / 2, midY = (A.y + B.y) / 2;
   return {
+    A: A, B: B,
     focalLength_px: focalLength_px, K_px_m: K_px_m,
     nearGate_m: nearGate_m, farGate_m: farGate_m,
     fallbackDiamPx: fallbackDiamPx,
@@ -826,6 +969,20 @@ function renderMeasureOverlay(){
   clearSvg();
   axialWindowRectEl = null;
   if (state.session.shootMode === "axial"){
+    // キャリブレーションで使った基準物の両端を、計測中もガイドとして薄く表示し続ける
+    var axA = state.axial.A, axB = state.axial.B;
+    var refLine = document.createElementNS(svgNS, "line");
+    refLine.setAttribute("x1", axA.x); refLine.setAttribute("y1", axA.y);
+    refLine.setAttribute("x2", axB.x); refLine.setAttribute("y2", axB.y);
+    refLine.setAttribute("class", "calib-line");
+    el.overlaySvg.appendChild(refLine);
+    [["A", axA], ["B", axB]].forEach(function(pair){
+      var c = document.createElementNS(svgNS, "circle");
+      c.setAttribute("cx", pair[1].x); c.setAttribute("cy", pair[1].y);
+      c.setAttribute("r", state.videoW * 0.012);
+      c.setAttribute("class", "calib-pin pin-" + pair[0]);
+      el.overlaySvg.appendChild(c);
+    });
     var rect = document.createElementNS(svgNS, "rect");
     rect.setAttribute("class", "corridor-poly");
     rect.setAttribute("rx", 12);
@@ -1291,8 +1448,17 @@ el.btnStartMeasure.addEventListener("click", function(){
   renderHistory();
   showPanel("measure");
   renderMeasureOverlay();
-  startMeasureLoop();
+  updateStopButtonLabel();
+  if (state.session.source === "file"){
+    startFileMeasurement();
+  } else {
+    startMeasureLoop();
+  }
 });
+
+function updateStopButtonLabel(){
+  el.btnStopCamera.textContent = state.session.source === "file" ? "終了して選び直す" : "カメラ停止";
+}
 
 el.sensitivityInput.addEventListener("input", function(){
   state.detect.sensitivity = parseFloat(el.sensitivityInput.value);
@@ -1302,6 +1468,11 @@ el.btnExportCsv.addEventListener("click", exportCsv);
 
 el.btnRecalibrate.addEventListener("click", function(){
   stopMeasureLoop();
+  if (state.session.source === "file"){
+    el.video.playbackRate = 1;
+    el.video.pause();
+    updateSeekUI();
+  }
   showPanel("calib");
   renderCalibOverlay();
 });
@@ -1310,6 +1481,13 @@ el.btnStopCamera.addEventListener("click", function(){
   stopMeasureLoop();
   if (state.fpsIntervalId){ clearInterval(state.fpsIntervalId); state.fpsIntervalId = null; }
   if (state.stream){ state.stream.getTracks().forEach(function(tr){ tr.stop(); }); state.stream = null; }
+  if (state.videoFileUrl){ URL.revokeObjectURL(state.videoFileUrl); state.videoFileUrl = null; }
+  el.video.pause();
+  el.video.removeAttribute("src");
+  el.video.load();
+  el.video.playbackRate = 1;
+  state.session.source = "live";
+  el.fileControls.hidden = true;
   el.fpsBadge.hidden = true;
   showPanel("start");
 });
