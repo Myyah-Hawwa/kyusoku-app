@@ -129,9 +129,12 @@ input[type="range"]{width:100%;}
   </div>
 
   <section id="panelStart" class="panel">
-    <p class="lead">iPhoneのカメラでボールの通過速度を計測します。三脚などで固定し、投球経路を<b>横から(側面)</b>映してください。</p>
+    <p class="lead">iPhoneのカメラでボールの通過速度を計測します。三脚などで固定し、投球経路が見渡せる位置(<b>真横〜斜め</b>)に設置してください。</p>
     <ul class="hint-list">
-      <li>ネット越し・正面からの撮影には対応していません(側面撮影専用)</li>
+      <li>真横に近いほど精度が高く安定します。斜め前方・斜め後方からの撮影にも対応しています</li>
+      <li>投球方向のほぼ正面に近い、かなり浅い角度は精度が大きく落ちるため、現バージョンでは非対応です</li>
+      <li>ネット越しなど視界を遮る場所からの撮影は精度が下がるためおすすめしません</li>
+      <li>キャリブレーションの基準点A・Bは、実際の基準位置(距離が分かっている2点)に正確にタップ・調整してください</li>
       <li>カメラ映像は端末の外へ送信されません</li>
       <li>この機能はHTTPS配信のページでのみ動作します(file://では起動できません)</li>
     </ul>
@@ -212,6 +215,8 @@ var MAX_SPEED_KMH = 170;
 var BG_ALPHA = 0.12;
 var MAX_TRANSIT_S = 3.0;
 var MIN_CONSEC_VALID = 2;
+var SIZE_EMA_ALPHA = 0.3;
+var SIZE_EMA_MIN_SAMPLES = 3;
 var svgNS = "http://www.w3.org/2000/svg";
 
 var el = {
@@ -276,7 +281,9 @@ var state = {
     sHistory: [],
     pendingCross: null,
     _lumaBuf: null,
-    _maskBuf: null
+    _maskBuf: null,
+    sizeEma: null,
+    sizeEmaN: 0
   },
   session: { readings: [] },
   dragging: null
@@ -503,7 +510,7 @@ function computeCorridor(){
   var metersPerPixel = state.calib.distanceM / lengthPx;
   var expectedBallPx = state.calib.ballDiameterM / metersPerPixel;
   // 実際の投球は重力落下や撮影角度のズレで基準線から外れるため、ボール径だけでなく距離に応じた余裕を持たせる
-  var widthPx = Math.max(expectedBallPx * 3, lengthPx * 0.05, 24);
+  var widthPx = Math.max(expectedBallPx * 5, lengthPx * 0.05, 24);
   var marginPx = expectedBallPx * 2.5;
   var rawLen = lengthPx + marginPx * 2;
   // 解析キャンバス上でボールが数ピクセル以上になるよう拡大する(小さすぎると縮小時にボールが背景へ溶けて検出できない)。
@@ -590,6 +597,8 @@ function resetDetectState(){
   state.detect.consecValid = 0;
   state.detect.sHistory = [];
   state.detect.pendingCross = null;
+  state.detect.sizeEma = null;
+  state.detect.sizeEmaN = 0;
 }
 
 function colorMaskValue(r, g, b, preset){
@@ -633,6 +642,7 @@ function registerMiss(){
   state.detect.consecValid = 0;
   if (state.detect.missStreak > 6){
     state.detect.lastTrack = null; state.detect.vx = 0; state.detect.vy = 0;
+    state.detect.sizeEma = null; state.detect.sizeEmaN = 0;
   }
   updateDetectDot(false);
 }
@@ -674,6 +684,10 @@ function chooseAndTrack(candidates, t, scale){
   detect.lastTrack = { x: chosen.cx, y: chosen.cy, t: t };
   detect.missStreak = 0;
   detect.consecValid++;
+  // 斜め撮影ではコリドー内の奥行きに応じてボールの見かけサイズが連続的に変わるため、
+  // 直近の確定検出サイズをEMAで追いかけて局所的な期待サイズとして使う(校正時の平均値だけに頼らない)
+  detect.sizeEma = (detect.sizeEma === null) ? chosen.h : detect.sizeEma + SIZE_EMA_ALPHA * (chosen.h - detect.sizeEma);
+  detect.sizeEmaN++;
   updateDetectDot(true);
 
   var s = (chosen.cx / scale) - state.corridor.marginPx;
@@ -819,13 +833,21 @@ function processFrame(t){
 
   var blobs = findBlobs(mask, w, h);
   var scale = cor.scale;
+  // 斜め撮影ではコリドーの奥(カメラに近い側/遠い側)でボールの見かけサイズが数倍変わりうるため、
+  // 校正時の平均サイズだけでなく追跡中の実測サイズ(EMA)も基準にする
   var expectedDiamPx = cor.expectedBallPx * scale;
-  var expectedAreaPx = Math.PI * (expectedDiamPx / 2) * (expectedDiamPx / 2);
+  var haveSizeEma = detect.sizeEma !== null && detect.sizeEmaN >= SIZE_EMA_MIN_SAMPLES;
+  var refDiamPx = haveSizeEma ? detect.sizeEma : expectedDiamPx;
+  var expectedAreaPx = Math.PI * (refDiamPx / 2) * (refDiamPx / 2);
   var candidates = [];
   for (var bi = 0; bi < blobs.length; bi++){
     var b = blobs[bi];
-    if (b.h < expectedDiamPx * 0.35 || b.h > expectedDiamPx * 2.6) continue;
-    if (b.w < expectedDiamPx * 0.3 || b.w > expectedDiamPx * 4.5) continue;
+    if (haveSizeEma){
+      if (b.h < refDiamPx * 0.55 || b.h > refDiamPx * 1.8) continue;
+    } else {
+      if (b.h < refDiamPx * 0.3 || b.h > refDiamPx * 3.4) continue;
+    }
+    if (b.w < refDiamPx * 0.3 || b.w > refDiamPx * 5.5) continue;
     var bboxArea = b.w * b.h;
     var fill = b.area / bboxArea;
     if (fill < 0.32) continue;
