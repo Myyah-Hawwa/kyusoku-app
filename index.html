@@ -17,6 +17,10 @@
   --card:#ffffff;
   --accent:#c5303a;
   --accent-soft: rgba(197,48,58,.12);
+  --ok:#2f8557;
+  --ok-soft: rgba(62,156,105,.12);
+  --warn:#a6740f;
+  --warn-soft: rgba(214,158,46,.15);
   --radius:14px;
   --shadow-sm:0 1px 0 rgba(27,42,74,.04), 0 3px 8px rgba(27,42,74,.06);
   --shadow:0 1px 0 rgba(27,42,74,.05), 0 8px 20px rgba(27,42,74,.09);
@@ -96,6 +100,13 @@ h1{font-size:1.05rem;margin:0;font-weight:800;letter-spacing:.02em;}
 
 input[type="range"]{width:100%;}
 
+.axial-caveat{font-size:.82rem;color:var(--ink-soft);font-weight:600;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;}
+.calib-hint{font-size:.8rem;font-weight:700;border-radius:10px;padding:9px 12px;margin:2px 0 12px;}
+.calib-hint.hint-ok{color:var(--ok);background:var(--ok-soft);}
+.calib-hint.hint-warn{color:var(--warn);background:var(--warn-soft);}
+.calib-hint.hint-bad{color:var(--accent);background:var(--accent-soft);}
+.warn-banner{font-size:.8rem;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1.4px solid rgba(197,48,58,.3);border-radius:10px;padding:10px 12px;margin-top:2px;}
+
 .readout{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 0 16px;}
 .readout-value{font-size:clamp(3.2rem,17vw,4.8rem);font-weight:800;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink);}
 .readout-value.low-confidence{color:var(--ink-faint);}
@@ -103,6 +114,10 @@ input[type="range"]{width:100%;}
 @keyframes speedPop{0%{transform:scale(.75);opacity:0;}55%{transform:scale(1.12);opacity:1;}100%{transform:scale(1);opacity:1;}}
 .readout-unit{font-size:.85rem;font-weight:800;color:var(--ink-soft);letter-spacing:.04em;}
 .readout-sub{font-size:.78rem;font-weight:700;color:var(--ink-faint);}
+.confidence-badge{font-size:.76rem;font-weight:800;border-radius:99px;padding:5px 14px;margin-top:6px;}
+.confidence-badge.tier-high{color:var(--ok);background:var(--ok-soft);}
+.confidence-badge.tier-medium{color:var(--warn);background:var(--warn-soft);}
+.confidence-badge.tier-low{color:var(--accent);background:var(--accent-soft);}
 
 .history-wrap{border-top:1.4px dashed var(--line);margin-top:8px;padding-top:10px;}
 .history-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
@@ -113,6 +128,10 @@ input[type="range"]{width:100%;}
 .hi-time{color:var(--ink-faint);font-variant-numeric:tabular-nums;font-weight:600;flex:0 0 auto;}
 .hi-speed{color:var(--ink);font-variant-numeric:tabular-nums;flex:1 1 auto;}
 .hi-mph{color:var(--ink-faint);font-variant-numeric:tabular-nums;font-weight:600;flex:0 0 auto;}
+.hi-tier{width:9px;height:9px;border-radius:50%;flex:0 0 auto;}
+.hi-tier.tier-high{background:var(--ok);}
+.hi-tier.tier-medium{background:var(--warn);}
+.hi-tier.tier-low{background:var(--accent);}
 
 .fine-print{font-size:.72rem;color:var(--ink-faint);font-weight:600;margin-top:12px;line-height:1.6;}
 
@@ -121,7 +140,7 @@ input[type="range"]{width:100%;}
 }
 </style>
 </head>
-<body data-mode="start">
+<body data-mode="start" data-shootmode="lateral">
 <div id="app">
   <div class="topbar">
     <h1>球速アプリ</h1>
@@ -129,12 +148,19 @@ input[type="range"]{width:100%;}
   </div>
 
   <section id="panelStart" class="panel">
-    <p class="lead">iPhoneのカメラでボールの通過速度を計測します。三脚などで固定し、投球経路が見渡せる位置(<b>真横〜斜め</b>)に設置してください。</p>
+    <p class="lead">iPhoneのカメラでボールの通過速度を計測します。三脚などで固定し、投球経路が見渡せる位置(<b>真横〜斜め、正面/背面</b>)に設置してください。</p>
+    <div class="field-row">
+      <span class="field-label">撮影アングル</span>
+      <div class="segmented" id="shootModeSeg">
+        <button type="button" class="seg-btn active" data-shoot="lateral">側面〜斜め</button>
+        <button type="button" class="seg-btn" data-shoot="axial">正面/背面(奥行き)</button>
+      </div>
+    </div>
     <ul class="hint-list">
-      <li>真横に近いほど精度が高く安定します。斜め前方・斜め後方からの撮影にも対応しています</li>
-      <li>投球方向のほぼ正面に近い、かなり浅い角度は精度が大きく落ちるため、現バージョンでは非対応です</li>
+      <li>「側面〜斜め」: 真横に近いほど精度が高く安定します。斜め前方・斜め後方からの撮影にも対応しています</li>
+      <li>「正面/背面」: バックネット越し・投手の後ろなど、ボールがカメラに近づく/遠ざかる形の撮影に対応します(見かけの大きさの変化から速度を計算するため、側面より精度は落ちます)</li>
       <li>ネット越しなど視界を遮る場所からの撮影は精度が下がるためおすすめしません</li>
-      <li>キャリブレーションの基準点A・Bは、実際の基準位置(距離が分かっている2点)に正確にタップ・調整してください</li>
+      <li>キャリブレーションの基準点は、実際の基準位置(距離が分かっている2点)に正確にタップ・調整してください</li>
       <li>カメラ映像は端末の外へ送信されません</li>
       <li>この機能はHTTPS配信のページでのみ動作します(file://では起動できません)</li>
     </ul>
@@ -151,9 +177,42 @@ input[type="range"]{width:100%;}
   </div>
 
   <section id="panelCalib" class="panel" hidden>
-    <p class="lead">映像上で<b>基準点A</b>と<b>基準点B</b>をタップしてください(実距離が分かっている2点。ピンはドラッグで微調整できます)。</p>
-    <div class="field-row">
-      <label for="distanceInput">A-B間の実距離(m)</label>
+    <p class="lead" id="calibLead">映像上で<b>基準点A</b>と<b>基準点B</b>をタップしてください(実距離が分かっている2点。ピンはドラッグで微調整できます)。</p>
+
+    <div id="calibAxialFields" hidden>
+      <p class="axial-caveat">正面/背面モードは、ボールの「写る大きさ」の変化から距離を計算するしくみです。遠くのボールほど小さく写り、誤差が急に大きくなるため、側面モードより精度は落ちます。カメラに近い範囲で計測するほど正確です。</p>
+      <div class="field-row">
+        <span class="field-label">基準にするもの(両端をタップ)</span>
+        <div class="segmented" id="refTypeSeg">
+          <button type="button" class="seg-btn active" data-ref="plate">ホームベース幅(0.4318m)</button>
+          <button type="button" class="seg-btn" data-ref="rubber">プレート奥行き(0.6096m)</button>
+          <button type="button" class="seg-btn" data-ref="custom">カスタム</button>
+        </div>
+        <div class="custom-ball" id="customRefFields" hidden>
+          <label>実幅(m)<input type="number" id="refWidthInput" value="0.4318" step="0.001" min="0.05"></label>
+        </div>
+      </div>
+      <div class="field-row">
+        <label for="camToRefInput">カメラ〜基準物の距離(m)</label>
+        <input type="number" id="camToRefInput" step="0.1" min="0.3" value="3.0">
+      </div>
+      <div class="field-row">
+        <label for="axialOffsetInput">判定区間(奥側までの追加距離, m)</label>
+        <input type="number" id="axialOffsetInput" step="0.5" min="0.5" value="4.0">
+      </div>
+      <p class="calib-hint" id="axialPreview" hidden></p>
+      <div class="field-row">
+        <span class="field-label">詳細設定</span>
+        <div class="segmented" id="axialModeSeg">
+          <button type="button" class="seg-btn active" data-axialmode="recommended">推奨(カメラ近くの短区間)</button>
+          <button type="button" class="seg-btn" data-axialmode="fullBaseline">マウンド〜プレート全体(低精度)</button>
+        </div>
+      </div>
+      <p class="warn-banner" id="axialFullBaselineWarn" hidden>⚠「マウンド〜プレート全体」設定は遠距離側の誤差がかなり大きくなります。あくまで参考値としてご利用ください。正確な値がほしいときは「推奨」設定をお使いください。</p>
+    </div>
+
+    <div class="field-row" id="distanceFieldRow">
+      <label for="distanceInput" id="distanceLabel">A-B間の実距離(m)</label>
       <input type="number" id="distanceInput" step="0.01" min="0.5" value="18.44">
       <button type="button" class="chip" id="chipStdDistance">硬式・一般 18.44m</button>
     </div>
@@ -186,6 +245,7 @@ input[type="range"]{width:100%;}
       <div class="readout-value" id="readoutKmh">--</div>
       <div class="readout-unit">km/h</div>
       <div class="readout-sub" id="readoutMph"></div>
+      <p class="confidence-badge" id="confidenceBadge" hidden></p>
     </div>
     <div class="field-row">
       <label for="sensitivityInput">感度</label>
@@ -202,7 +262,7 @@ input[type="range"]{width:100%;}
       <button type="button" id="btnRecalibrate" class="btn btn-ghost">キャリブレーションやり直し</button>
       <button type="button" id="btnStopCamera" class="btn btn-ghost">カメラ停止</button>
     </div>
-    <p class="fine-print">表示速度は基準点A-B間の平均速度です(区間内の減速は無視できる範囲として計算)。薄く表示される数値は前後フレームの検出が途切れた「低信頼」の測定です。</p>
+    <p class="fine-print">側面〜斜めモードの表示速度は基準点間の平均速度です(区間内の減速は無視できる範囲として計算)。薄く表示される数値は「低信頼」の測定です。</p>
   </section>
 </div>
 
@@ -217,6 +277,11 @@ var MAX_TRANSIT_S = 3.0;
 var MIN_CONSEC_VALID = 2;
 var SIZE_EMA_ALPHA = 0.3;
 var SIZE_EMA_MIN_SAMPLES = 3;
+var MIN_AXIAL_SAMPLES = 8;
+var AXIAL_DIAM_FLOOR_PX = 4;   // 回帰に使うサンプルの絶対下限(これ未満は1/xの発散を避けるため使わない)
+var AXIAL_REJECT_PX = 8;       // 遠端の見かけ直径がこれ未満なら数値を出さず「計測できません」
+var AXIAL_CONF_YELLOW_PX = 15; // 黄(ふつう)の下限
+var AXIAL_CONF_GREEN_PX = 25;  // 緑(高い)の下限
 var svgNS = "http://www.w3.org/2000/svg";
 
 var el = {
@@ -231,6 +296,19 @@ var el = {
   detectDot: document.getElementById("detectDot"),
   btnStartCamera: document.getElementById("btnStartCamera"),
   startError: document.getElementById("startError"),
+  shootModeSeg: document.getElementById("shootModeSeg"),
+  calibLead: document.getElementById("calibLead"),
+  calibAxialFields: document.getElementById("calibAxialFields"),
+  refTypeSeg: document.getElementById("refTypeSeg"),
+  customRefFields: document.getElementById("customRefFields"),
+  refWidthInput: document.getElementById("refWidthInput"),
+  camToRefInput: document.getElementById("camToRefInput"),
+  axialOffsetInput: document.getElementById("axialOffsetInput"),
+  axialPreview: document.getElementById("axialPreview"),
+  axialModeSeg: document.getElementById("axialModeSeg"),
+  axialFullBaselineWarn: document.getElementById("axialFullBaselineWarn"),
+  distanceFieldRow: document.getElementById("distanceFieldRow"),
+  distanceLabel: document.getElementById("distanceLabel"),
   distanceInput: document.getElementById("distanceInput"),
   chipStdDistance: document.getElementById("chipStdDistance"),
   ballTypeSeg: document.getElementById("ballTypeSeg"),
@@ -245,12 +323,19 @@ var el = {
   btnRecalibrate: document.getElementById("btnRecalibrate"),
   btnStopCamera: document.getElementById("btnStopCamera"),
   readoutKmh: document.getElementById("readoutKmh"),
-  readoutMph: document.getElementById("readoutMph")
+  readoutMph: document.getElementById("readoutMph"),
+  confidenceBadge: document.getElementById("confidenceBadge")
 };
+
+var axialWindowRectEl = null;
 
 var BALL_PRESETS = {
   baseball: { diam: 0.073, color: "white" },
   softball: { diam: 0.097, color: "yellow" }
+};
+var REF_PRESETS = {
+  plate: 0.4318,
+  rubber: 0.6096
 };
 
 var state = {
@@ -261,14 +346,22 @@ var state = {
   fpsIntervalId: null,
   running: false,
   usingRVFC: false,
+  session: { readings: [], shootMode: "lateral" },
   calib: {
     A: null,
     B: null,
     distanceM: 18.44,
     ballDiameterM: BALL_PRESETS.baseball.diam,
-    ballColor: BALL_PRESETS.baseball.color
+    ballColor: BALL_PRESETS.baseball.color,
+    refType: "plate",
+    refRealWidth_m: REF_PRESETS.plate,
+    camToRef_m: 3.0,
+    offset_m: 4.0,
+    measurementWindowMode: "recommended"
   },
   corridor: null,
+  axial: null,
+  axialPreviewOk: false,
   detect: {
     sensitivity: 0.5,
     bg: null,
@@ -283,9 +376,10 @@ var state = {
     _lumaBuf: null,
     _maskBuf: null,
     sizeEma: null,
-    sizeEmaN: 0
+    sizeEmaN: 0,
+    track: [],
+    searchWindow: null
   },
-  session: { readings: [] },
   dragging: null
 };
 
@@ -388,6 +482,36 @@ function fitStage(){
 }
 window.addEventListener("resize", fitStage);
 
+// ---------- 撮影アングル(モード)切替 ----------
+var shootModeButtons = Array.prototype.slice.call(el.shootModeSeg.querySelectorAll(".seg-btn"));
+shootModeButtons.forEach(function(btn){
+  btn.addEventListener("click", function(){
+    shootModeButtons.forEach(function(b){ b.classList.toggle("active", b === btn); });
+    state.session.shootMode = btn.dataset.shoot;
+    updateShootModeUI();
+  });
+});
+
+function updateShootModeUI(){
+  var mode = state.session.shootMode;
+  document.body.dataset.shootmode = mode;
+  el.calibAxialFields.hidden = mode !== "axial";
+  if (mode === "axial"){
+    el.calibLead.innerHTML = "映像上で<b>基準物の両端</b>(例: ホームベースの両端)をタップしてください(ピンはドラッグで微調整できます)。";
+    el.distanceLabel.textContent = "マウンド〜プレートの距離(m)";
+  } else {
+    el.calibLead.innerHTML = "映像上で<b>基準点A</b>と<b>基準点B</b>をタップしてください(実距離が分かっている2点。ピンはドラッグで微調整できます)。";
+    el.distanceLabel.textContent = "A-B間の実距離(m)";
+  }
+  updateDistanceFieldVisibility();
+  updateStartMeasureEnabled();
+}
+
+function updateDistanceFieldVisibility(){
+  var mode = state.session.shootMode;
+  el.distanceFieldRow.hidden = (mode === "axial" && state.calib.measurementWindowMode !== "fullBaseline");
+}
+
 // ---------- キャリブレーション: 座標変換 ----------
 function svgPointFromEvent(evt){
   var pt = el.overlaySvg.createSVGPoint();
@@ -423,6 +547,7 @@ el.overlaySvg.addEventListener("pointermove", function(e){
   if (!pt) return;
   state.calib[state.dragging] = pt;
   renderCalibOverlay();
+  updateStartMeasureEnabled();
 });
 el.overlaySvg.addEventListener("pointerup", function(){ state.dragging = null; });
 el.overlaySvg.addEventListener("pointercancel", function(){ state.dragging = null; });
@@ -487,21 +612,101 @@ segButtons.forEach(function(btn){
       state.calib.ballDiameterM = (parseFloat(el.ballDiameterInput.value) || 7.3) / 100;
       state.calib.ballColor = el.ballColorInput.value;
     }
+    updateStartMeasureEnabled();
   });
 });
 el.ballDiameterInput.addEventListener("input", function(){
   state.calib.ballDiameterM = (parseFloat(el.ballDiameterInput.value) || 7.3) / 100;
+  updateStartMeasureEnabled();
 });
 el.ballColorInput.addEventListener("change", function(){
   state.calib.ballColor = el.ballColorInput.value;
 });
 
-function updateStartMeasureEnabled(){
-  var ok = state.calib.A && state.calib.B && state.calib.distanceM > 0;
-  el.btnStartMeasure.disabled = !ok;
+// ---------- 正面/背面モード: キャリブレーション入力 ----------
+var refTypeButtons = Array.prototype.slice.call(el.refTypeSeg.querySelectorAll(".seg-btn"));
+refTypeButtons.forEach(function(btn){
+  btn.addEventListener("click", function(){
+    refTypeButtons.forEach(function(b){ b.classList.toggle("active", b === btn); });
+    var kind = btn.dataset.ref;
+    el.customRefFields.hidden = kind !== "custom";
+    state.calib.refType = kind;
+    if (kind !== "custom"){
+      state.calib.refRealWidth_m = REF_PRESETS[kind];
+    } else {
+      state.calib.refRealWidth_m = parseFloat(el.refWidthInput.value) || 0.4318;
+    }
+    updateStartMeasureEnabled();
+  });
+});
+el.refWidthInput.addEventListener("input", function(){
+  state.calib.refRealWidth_m = parseFloat(el.refWidthInput.value) || 0.4318;
+  updateStartMeasureEnabled();
+});
+el.camToRefInput.addEventListener("input", function(){
+  state.calib.camToRef_m = parseFloat(el.camToRefInput.value) || 0;
+  updateStartMeasureEnabled();
+});
+el.axialOffsetInput.addEventListener("input", function(){
+  state.calib.offset_m = parseFloat(el.axialOffsetInput.value) || 0;
+  updateStartMeasureEnabled();
+});
+var axialModeButtons = Array.prototype.slice.call(el.axialModeSeg.querySelectorAll(".seg-btn"));
+axialModeButtons.forEach(function(btn){
+  btn.addEventListener("click", function(){
+    axialModeButtons.forEach(function(b){ b.classList.toggle("active", b === btn); });
+    state.calib.measurementWindowMode = btn.dataset.axialmode;
+    el.axialFullBaselineWarn.hidden = state.calib.measurementWindowMode !== "fullBaseline";
+    updateDistanceFieldVisibility();
+    updateStartMeasureEnabled();
+  });
+});
+
+function updateAxialPreview(){
+  var A = state.calib.A, B = state.calib.B;
+  if (!A || !B || !state.calib.camToRef_m || !state.calib.refRealWidth_m){
+    el.axialPreview.hidden = true;
+    return false;
+  }
+  var refPx = dist(A, B);
+  if (refPx <= 0){ el.axialPreview.hidden = true; return false; }
+  var focalLength_px = refPx * state.calib.camToRef_m / state.calib.refRealWidth_m;
+  var K = focalLength_px * state.calib.ballDiameterM;
+  var farGate_m = state.calib.measurementWindowMode === "fullBaseline"
+    ? state.calib.camToRef_m + (state.calib.distanceM || 0)
+    : state.calib.camToRef_m + (state.calib.offset_m || 0);
+  if (farGate_m <= 0){ el.axialPreview.hidden = true; return false; }
+  var diamFar = K / farGate_m;
+  var cls, msg, ok;
+  if (diamFar >= AXIAL_CONF_GREEN_PX){
+    cls = "hint-ok"; ok = true;
+    msg = "この設定なら誤差はおおむね数%以内です(遠端の見かけ直径: " + diamFar.toFixed(1) + "px)";
+  } else if (diamFar >= AXIAL_CONF_YELLOW_PX){
+    cls = "hint-warn"; ok = true;
+    msg = "この距離だと誤差がやや大きくなります(推定 ±10〜20%、遠端の見かけ直径: " + diamFar.toFixed(1) + "px)";
+  } else {
+    cls = "hint-bad"; ok = false;
+    msg = "この距離ではボールが小さく写りすぎて計測できません(遠端の見かけ直径: " + diamFar.toFixed(1) + "px)。カメラを近づけるか、判定区間を短くしてください。";
+  }
+  el.axialPreview.hidden = false;
+  el.axialPreview.className = "calib-hint " + cls;
+  el.axialPreview.textContent = msg;
+  if (state.calib.measurementWindowMode === "fullBaseline") ok = true; // 低精度モードは明示同意の上で許可
+  return ok;
 }
 
-// ---------- コリドー(解析回廊)の幾何計算 ----------
+function updateStartMeasureEnabled(){
+  if (state.session.shootMode === "axial"){
+    var basicOk = state.calib.A && state.calib.B && state.calib.refRealWidth_m > 0 && state.calib.camToRef_m > 0;
+    var previewOk = basicOk ? updateAxialPreview() : false;
+    el.btnStartMeasure.disabled = !(basicOk && previewOk);
+  } else {
+    var ok = state.calib.A && state.calib.B && state.calib.distanceM > 0;
+    el.btnStartMeasure.disabled = !ok;
+  }
+}
+
+// ---------- コリドー(解析回廊)の幾何計算: 側面〜斜めモード ----------
 function computeCorridor(){
   var A = state.calib.A, B = state.calib.B;
   var dx = B.x - A.x, dy = B.y - A.y;
@@ -572,22 +777,87 @@ function corridorPolygonPoints(cor){
   ];
 }
 
-function renderMeasureOverlay(){
-  clearSvg();
-  var poly = document.createElementNS(svgNS, "polygon");
-  poly.setAttribute("points", corridorPolygonPoints(state.corridor).map(function(p){ return p.x + "," + p.y; }).join(" "));
-  poly.setAttribute("class", "corridor-poly");
-  el.overlaySvg.appendChild(poly);
-  [["A", state.corridor.A], ["B", state.corridor.B]].forEach(function(pair){
-    var c = document.createElementNS(svgNS, "circle");
-    c.setAttribute("cx", pair[1].x); c.setAttribute("cy", pair[1].y);
-    c.setAttribute("r", state.videoW * 0.012);
-    c.setAttribute("class", "calib-pin pin-" + pair[0]);
-    el.overlaySvg.appendChild(c);
-  });
+// ---------- 正面/背面モード: セットアップ(奥行き) ----------
+function computeAxialSetup(){
+  var A = state.calib.A, B = state.calib.B;
+  var refPx = dist(A, B);
+  var focalLength_px = refPx * state.calib.camToRef_m / state.calib.refRealWidth_m;
+  var K_px_m = focalLength_px * state.calib.ballDiameterM;
+  var nearGate_m = state.calib.camToRef_m;
+  var farGate_m = state.calib.measurementWindowMode === "fullBaseline"
+    ? state.calib.camToRef_m + state.calib.distanceM
+    : state.calib.camToRef_m + state.calib.offset_m;
+  var diamNear_px = K_px_m / nearGate_m;
+  var diamFar_px = K_px_m / farGate_m;
+  var fallbackDiamPx = Math.sqrt(diamNear_px * diamFar_px);
+  var maxDim = 480;
+  var scale = Math.min(1, maxDim / Math.max(state.videoW, state.videoH));
+  var canvasW = Math.max(64, Math.round(state.videoW * scale));
+  var canvasH = Math.max(64, Math.round(state.videoH * scale));
+  var midX = (A.x + B.x) / 2, midY = (A.y + B.y) / 2;
+  return {
+    focalLength_px: focalLength_px, K_px_m: K_px_m,
+    nearGate_m: nearGate_m, farGate_m: farGate_m,
+    fallbackDiamPx: fallbackDiamPx,
+    scale: scale, canvasW: canvasW, canvasH: canvasH,
+    initCx: midX * scale, initCy: midY * scale,
+    canvas: null, ctx: null
+  };
 }
 
-// ---------- 検出・追跡 ----------
+function setupAxialCanvas(){
+  var c = document.createElement("canvas");
+  c.width = state.axial.canvasW;
+  c.height = state.axial.canvasH;
+  state.axial.canvas = c;
+  state.axial.ctx = c.getContext("2d", { willReadFrequently: true });
+}
+
+function drawAxialFrame(){
+  var ax = state.axial, ctx = ax.ctx;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ax.canvasW, ax.canvasH);
+  ctx.setTransform(ax.scale, 0, 0, ax.scale, 0, 0);
+  ctx.drawImage(el.video, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function renderMeasureOverlay(){
+  clearSvg();
+  axialWindowRectEl = null;
+  if (state.session.shootMode === "axial"){
+    var rect = document.createElementNS(svgNS, "rect");
+    rect.setAttribute("class", "corridor-poly");
+    rect.setAttribute("rx", 12);
+    axialWindowRectEl = rect;
+    el.overlaySvg.appendChild(rect);
+    updateAxialWindowOverlay();
+  } else {
+    var poly = document.createElementNS(svgNS, "polygon");
+    poly.setAttribute("points", corridorPolygonPoints(state.corridor).map(function(p){ return p.x + "," + p.y; }).join(" "));
+    poly.setAttribute("class", "corridor-poly");
+    el.overlaySvg.appendChild(poly);
+    [["A", state.corridor.A], ["B", state.corridor.B]].forEach(function(pair){
+      var c = document.createElementNS(svgNS, "circle");
+      c.setAttribute("cx", pair[1].x); c.setAttribute("cy", pair[1].y);
+      c.setAttribute("r", state.videoW * 0.012);
+      c.setAttribute("class", "calib-pin pin-" + pair[0]);
+      el.overlaySvg.appendChild(c);
+    });
+  }
+}
+
+function updateAxialWindowOverlay(){
+  if (!axialWindowRectEl || !state.axial || !state.detect.searchWindow) return;
+  var ax = state.axial, sw = state.detect.searchWindow;
+  var vx = sw.cx / ax.scale, vy = sw.cy / ax.scale, vsize = sw.size / ax.scale;
+  axialWindowRectEl.setAttribute("x", vx - vsize / 2);
+  axialWindowRectEl.setAttribute("y", vy - vsize / 2);
+  axialWindowRectEl.setAttribute("width", vsize);
+  axialWindowRectEl.setAttribute("height", vsize);
+}
+
+// ---------- 検出・追跡(共通) ----------
 function resetDetectState(){
   state.detect.bg = null;
   state.detect.prevMeanLum = null;
@@ -599,6 +869,8 @@ function resetDetectState(){
   state.detect.pendingCross = null;
   state.detect.sizeEma = null;
   state.detect.sizeEmaN = 0;
+  state.detect.track = [];
+  state.detect.searchWindow = null;
 }
 
 function colorMaskValue(r, g, b, preset){
@@ -641,8 +913,12 @@ function registerMiss(){
   state.detect.missStreak++;
   state.detect.consecValid = 0;
   if (state.detect.missStreak > 6){
+    if (state.session.shootMode === "axial" && state.detect.track.length >= MIN_AXIAL_SAMPLES){
+      finalizeAxialReading();
+    }
     state.detect.lastTrack = null; state.detect.vx = 0; state.detect.vy = 0;
     state.detect.sizeEma = null; state.detect.sizeEmaN = 0;
+    state.detect.track = [];
   }
   updateDetectDot(false);
 }
@@ -657,14 +933,21 @@ function flashDetectDot(){
 
 function chooseAndTrack(candidates, t, scale){
   var detect = state.detect;
+  var mode = state.session.shootMode;
   var chosen = null;
   if (!candidates.length){ registerMiss(); return; }
   if (detect.lastTrack){
     var dt = t - detect.lastTrack.t;
     var predX = detect.lastTrack.x + detect.vx * dt;
     var predY = detect.lastTrack.y + detect.vy * dt;
-    var maxPxPerSec = (MAX_SPEED_KMH / 3.6) / state.corridor.metersPerPixel * scale * 1.6;
-    var gateRadius = Math.max(maxPxPerSec * Math.max(dt, 0.001), 6);
+    var gateRadius;
+    if (mode === "axial"){
+      var refSize = (detect.sizeEma !== null) ? detect.sizeEma : state.axial.fallbackDiamPx;
+      gateRadius = Math.max(refSize * 2.5, 40);
+    } else {
+      var maxPxPerSec = (MAX_SPEED_KMH / 3.6) / state.corridor.metersPerPixel * scale * 1.6;
+      gateRadius = Math.max(maxPxPerSec * Math.max(dt, 0.001), 6);
+    }
     var best = null, bestD = Infinity;
     for (var i = 0; i < candidates.length; i++){
       var d = Math.hypot(candidates[i].cx - predX, candidates[i].cy - predY);
@@ -684,16 +967,26 @@ function chooseAndTrack(candidates, t, scale){
   detect.lastTrack = { x: chosen.cx, y: chosen.cy, t: t };
   detect.missStreak = 0;
   detect.consecValid++;
-  // 斜め撮影ではコリドー内の奥行きに応じてボールの見かけサイズが連続的に変わるため、
-  // 直近の確定検出サイズをEMAで追いかけて局所的な期待サイズとして使う(校正時の平均値だけに頼らない)
+  // 校正時の平均サイズだけでなく、直近の確定検出サイズをEMAで追いかけて局所的な期待サイズとして使う
+  // (斜めコリドーでは奥行き位置に応じて、正面/背面モードでは経過時間に応じてボールの見かけサイズが連続的に変わるため)
   detect.sizeEma = (detect.sizeEma === null) ? chosen.h : detect.sizeEma + SIZE_EMA_ALPHA * (chosen.h - detect.sizeEma);
   detect.sizeEmaN++;
   updateDetectDot(true);
 
-  var s = (chosen.cx / scale) - state.corridor.marginPx;
-  pushSHistory(s, t);
+  if (mode === "axial"){
+    detect.searchWindow.cx = chosen.cx;
+    detect.searchWindow.cy = chosen.cy;
+    detect.searchWindow.size = Math.max(detect.sizeEma * 4, 60);
+    detect.track.push({ t: t, diam: chosen.h });
+    if (detect.track.length > 300) detect.track.shift();
+    updateAxialWindowOverlay();
+  } else {
+    var s = (chosen.cx / scale) - state.corridor.marginPx;
+    pushSHistory(s, t);
+  }
 }
 
+// ---------- 側面〜斜めモード: ゲート通過判定 ----------
 function pushSHistory(s, t){
   var detect = state.detect;
   detect.sHistory.push({ s: s, t: t });
@@ -731,15 +1024,59 @@ function handleGateEvent(gate, t, confident){
     return;
   }
   var speedMps = (state.corridor.lengthPx * state.corridor.metersPerPixel) / elapsed;
-  recordSpeed(speedMps, pending.confident && confident);
+  recordSpeed(speedMps, pending.confident && confident, null);
   detect.pendingCross = null;
 }
 
-function recordSpeed(speedMps, highConfidence){
+// ---------- 正面/背面モード: 見かけサイズからの奥行きゲート判定 ----------
+function finalizeAxialReading(){
+  var ax = state.axial;
+  var pts = state.detect.track.filter(function(s){ return s.diam >= AXIAL_DIAM_FLOOR_PX; });
+  if (pts.length < MIN_AXIAL_SAMPLES) return;
+
+  // 重み付き最小二乗: 1/diam = a*t + b (重み = diam^4 で、精度の高い近距離側サンプルを強く効かせる)
+  var sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0;
+  for (var i = 0; i < pts.length; i++){
+    var inv = 1 / pts[i].diam;
+    var w = Math.pow(pts[i].diam, 4);
+    sw += w; swx += w * pts[i].t; swy += w * inv;
+    swxx += w * pts[i].t * pts[i].t; swxy += w * pts[i].t * inv;
+  }
+  var denom = sw * swxx - swx * swx;
+  if (Math.abs(denom) < 1e-9) return;
+  var a = (sw * swxy - swx * swy) / denom;
+  var b = (swy - a * swx) / sw;
+  if (a === 0) return;
+
+  var diamNear_px = ax.K_px_m / ax.nearGate_m;
+  var diamFar_px = ax.K_px_m / ax.farGate_m;
+  if (diamFar_px < AXIAL_REJECT_PX){
+    showAxialLowSignalNotice();
+    return;
+  }
+  var tNear = (1 / diamNear_px - b) / a;
+  var tFar = (1 / diamFar_px - b) / a;
+  var elapsed = Math.abs(tFar - tNear);
+  if (!isFinite(elapsed) || elapsed <= 0) return;
+
+  var speedMps = Math.abs(ax.farGate_m - ax.nearGate_m) / elapsed;
+  var tier = diamFar_px >= AXIAL_CONF_GREEN_PX ? "high" : (diamFar_px >= AXIAL_CONF_YELLOW_PX ? "medium" : "low");
+  recordSpeed(speedMps, tier !== "low", tier);
+}
+
+function showAxialLowSignalNotice(){
+  el.confidenceBadge.hidden = false;
+  el.confidenceBadge.className = "confidence-badge tier-low";
+  el.confidenceBadge.textContent = "この計測ではボールが小さく写りすぎて、信頼できる速度を出せませんでした。";
+  el.readoutKmh.textContent = "--";
+  el.readoutMph.textContent = "";
+}
+
+function recordSpeed(speedMps, highConfidence, confidenceTier){
   var kmh = speedMps * 3.6;
   if (!isFinite(kmh) || kmh < MIN_SPEED_KMH || kmh > MAX_SPEED_KMH) return;
   var mph = speedMps * 2.23694;
-  var reading = { time: new Date(), kmh: kmh, mph: mph, highConfidence: highConfidence };
+  var reading = { time: new Date(), kmh: kmh, mph: mph, highConfidence: highConfidence, confidenceTier: confidenceTier || null };
   state.session.readings.unshift(reading);
   if (state.session.readings.length > 50) state.session.readings.pop();
   renderReadout(reading);
@@ -754,6 +1091,19 @@ function renderReadout(reading){
   el.readoutKmh.classList.remove("pop");
   void el.readoutKmh.offsetWidth;
   el.readoutKmh.classList.add("pop");
+  renderConfidenceBadge(reading.confidenceTier);
+}
+
+function renderConfidenceBadge(tier){
+  if (!tier){ el.confidenceBadge.hidden = true; return; }
+  var labels = {
+    high: "信頼度: 高い(誤差目安 ±5%程度)",
+    medium: "信頼度: ふつう(誤差目安 ±10〜15%)",
+    low: "信頼度: 低い(誤差目安 ±20%以上、参考値)"
+  };
+  el.confidenceBadge.hidden = false;
+  el.confidenceBadge.className = "confidence-badge tier-" + tier;
+  el.confidenceBadge.textContent = labels[tier];
 }
 
 function renderHistory(){
@@ -766,6 +1116,11 @@ function renderHistory(){
     var k = document.createElement("span"); k.className = "hi-speed"; k.textContent = r.kmh.toFixed(1) + " km/h";
     var m = document.createElement("span"); m.className = "hi-mph"; m.textContent = r.mph.toFixed(1) + " mph";
     li.appendChild(t); li.appendChild(k); li.appendChild(m);
+    if (r.confidenceTier){
+      var tierDot = document.createElement("span");
+      tierDot.className = "hi-tier tier-" + r.confidenceTier;
+      li.appendChild(tierDot);
+    }
     el.historyList.appendChild(li);
   });
 }
@@ -773,7 +1128,7 @@ function renderHistory(){
 function exportCsv(){
   var rows = ["time,speed_kmh,speed_mph,confidence"];
   state.session.readings.forEach(function(r){
-    rows.push([r.time.toISOString(), r.kmh.toFixed(1), r.mph.toFixed(1), r.highConfidence ? "high" : "low"].join(","));
+    rows.push([r.time.toISOString(), r.kmh.toFixed(1), r.mph.toFixed(1), r.confidenceTier || (r.highConfidence ? "high" : "low")].join(","));
   });
   var blob = new Blob([rows.join("\n")], { type: "text/csv" });
   var url = URL.createObjectURL(blob);
@@ -787,12 +1142,11 @@ function exportCsv(){
 }
 function pad2(n){ return n < 10 ? "0" + n : "" + n; }
 
-// ---------- 1フレーム分の解析 ----------
-function processFrame(t){
-  var cor = state.corridor, detect = state.detect;
-  drawCorridorFrame();
-  var w = cor.canvasW, h = cor.canvasH, n = w * h;
-  var imgData = cor.ctx.getImageData(0, 0, w, h);
+// ---------- 1フレーム分の解析: 背景差分・輝度マスク(共通) ----------
+function detectForeground(ctx, w, h){
+  var detect = state.detect;
+  var n = w * h;
+  var imgData = ctx.getImageData(0, 0, w, h);
   var data = imgData.data;
 
   if (!detect._lumaBuf || detect._lumaBuf.length !== n){
@@ -828,16 +1182,13 @@ function processFrame(t){
     mask[i] = isFg ? 1 : 0;
     bg[i] = bg[i] * (1 - BG_ALPHA) + luma[i] * BG_ALPHA;
   }
+  return { mask: mask, shakeFlag: shakeFlag };
+}
 
-  if (shakeFlag){ registerMiss(); return; }
-
-  var blobs = findBlobs(mask, w, h);
-  var scale = cor.scale;
-  // 斜め撮影ではコリドーの奥(カメラに近い側/遠い側)でボールの見かけサイズが数倍変わりうるため、
-  // 校正時の平均サイズだけでなく追跡中の実測サイズ(EMA)も基準にする
-  var expectedDiamPx = cor.expectedBallPx * scale;
+function filterCandidatesBySize(blobs, fallbackDiamPx){
+  var detect = state.detect;
   var haveSizeEma = detect.sizeEma !== null && detect.sizeEmaN >= SIZE_EMA_MIN_SAMPLES;
-  var refDiamPx = haveSizeEma ? detect.sizeEma : expectedDiamPx;
+  var refDiamPx = haveSizeEma ? detect.sizeEma : fallbackDiamPx;
   var expectedAreaPx = Math.PI * (refDiamPx / 2) * (refDiamPx / 2);
   var candidates = [];
   for (var bi = 0; bi < blobs.length; bi++){
@@ -855,7 +1206,43 @@ function processFrame(t){
     b.score = sizeScore * fill;
     candidates.push(b);
   }
-  chooseAndTrack(candidates, t, scale);
+  return candidates;
+}
+
+function processFrameLateral(t){
+  var cor = state.corridor;
+  drawCorridorFrame();
+  var w = cor.canvasW, h = cor.canvasH;
+  var fg = detectForeground(cor.ctx, w, h);
+  if (fg.shakeFlag){ registerMiss(); return; }
+  var blobs = findBlobs(fg.mask, w, h);
+  var expectedDiamPx = cor.expectedBallPx * cor.scale;
+  var candidates = filterCandidatesBySize(blobs, expectedDiamPx);
+  chooseAndTrack(candidates, t, cor.scale);
+}
+
+function processFrameAxial(t){
+  var ax = state.axial;
+  drawAxialFrame();
+  var w = ax.canvasW, h = ax.canvasH;
+  var fg = detectForeground(ax.ctx, w, h);
+  if (fg.shakeFlag){ registerMiss(); return; }
+  var blobs = findBlobs(fg.mask, w, h);
+  // 全画面差分は背景全体を見ているため、探索ウィンドウ内の候補だけに絞る
+  var sw = state.detect.searchWindow;
+  var inWindow = blobs.filter(function(b){
+    return Math.abs(b.cx - sw.cx) < sw.size / 2 && Math.abs(b.cy - sw.cy) < sw.size / 2;
+  });
+  var candidates = filterCandidatesBySize(inWindow, ax.fallbackDiamPx);
+  chooseAndTrack(candidates, t, ax.scale);
+}
+
+function processFrame(t){
+  if (state.session.shootMode === "axial"){
+    processFrameAxial(t);
+  } else {
+    processFrameLateral(t);
+  }
 }
 
 // ---------- メインループ ----------
@@ -887,12 +1274,20 @@ function stopMeasureLoop(){
 el.btnStartCamera.addEventListener("click", startCamera);
 
 el.btnStartMeasure.addEventListener("click", function(){
-  state.corridor = computeCorridor();
-  setupCorridorCanvas();
-  resetDetectState();
+  if (state.session.shootMode === "axial"){
+    state.axial = computeAxialSetup();
+    setupAxialCanvas();
+    resetDetectState();
+    state.detect.searchWindow = { cx: state.axial.initCx, cy: state.axial.initCy, size: Math.max(state.axial.fallbackDiamPx * 6, 100) };
+  } else {
+    state.corridor = computeCorridor();
+    setupCorridorCanvas();
+    resetDetectState();
+  }
   state.session.readings = [];
   el.readoutKmh.textContent = "--";
   el.readoutMph.textContent = "";
+  el.confidenceBadge.hidden = true;
   renderHistory();
   showPanel("measure");
   renderMeasureOverlay();
