@@ -223,7 +223,7 @@ input[type="range"]{width:100%;}
         <label for="camToRefInput">カメラ〜基準物の距離(m)</label>
         <input type="number" id="camToRefInput" step="0.1" min="0.3" value="3.0">
       </div>
-      <div class="field-row">
+      <div class="field-row" id="axialOffsetFieldRow">
         <label for="axialOffsetInput">判定区間(奥側までの追加距離, m)</label>
         <input type="number" id="axialOffsetInput" step="0.5" min="0.5" value="4.0">
       </div>
@@ -243,6 +243,7 @@ input[type="range"]{width:100%;}
       <input type="number" id="distanceInput" step="0.01" min="0.5" value="18.44">
       <button type="button" class="chip" id="chipStdDistance">硬式・一般 18.44m</button>
     </div>
+    <p class="calib-hint" id="lateralPreview" hidden></p>
     <div class="field-row">
       <span class="field-label">ボール種類</span>
       <div class="segmented" id="ballTypeSeg">
@@ -262,6 +263,7 @@ input[type="range"]{width:100%;}
       </div>
     </div>
     <div class="btn-row">
+      <button type="button" id="btnBackToStart" class="btn btn-ghost">開始画面に戻る</button>
       <button type="button" id="btnResetPoints" class="btn btn-ghost">基準点をやり直す</button>
       <button type="button" id="btnStartMeasure" class="btn btn-primary" disabled>計測開始</button>
     </div>
@@ -289,7 +291,7 @@ input[type="range"]{width:100%;}
       <button type="button" id="btnRecalibrate" class="btn btn-ghost">キャリブレーションやり直し</button>
       <button type="button" id="btnStopCamera" class="btn btn-ghost">カメラ停止</button>
     </div>
-    <p class="fine-print">側面〜斜めモードの表示速度は基準点間の平均速度です(区間内の減速は無視できる範囲として計算)。薄く表示される数値は「低信頼」の測定です。</p>
+    <p class="fine-print" id="measureFinePrint">側面〜斜めモードの表示速度は基準点間の平均速度です(区間内の減速は無視できる範囲として計算)。薄く表示される数値は「低信頼」の測定です。</p>
   </section>
 </div>
 
@@ -337,6 +339,7 @@ var el = {
   refWidthInput: document.getElementById("refWidthInput"),
   camToRefInput: document.getElementById("camToRefInput"),
   axialOffsetInput: document.getElementById("axialOffsetInput"),
+  axialOffsetFieldRow: document.getElementById("axialOffsetFieldRow"),
   axialPreview: document.getElementById("axialPreview"),
   axialModeSeg: document.getElementById("axialModeSeg"),
   axialFullBaselineWarn: document.getElementById("axialFullBaselineWarn"),
@@ -344,10 +347,12 @@ var el = {
   distanceLabel: document.getElementById("distanceLabel"),
   distanceInput: document.getElementById("distanceInput"),
   chipStdDistance: document.getElementById("chipStdDistance"),
+  lateralPreview: document.getElementById("lateralPreview"),
   ballTypeSeg: document.getElementById("ballTypeSeg"),
   customBallFields: document.getElementById("customBallFields"),
   ballDiameterInput: document.getElementById("ballDiameterInput"),
   ballColorInput: document.getElementById("ballColorInput"),
+  btnBackToStart: document.getElementById("btnBackToStart"),
   btnResetPoints: document.getElementById("btnResetPoints"),
   btnStartMeasure: document.getElementById("btnStartMeasure"),
   sensitivityInput: document.getElementById("sensitivityInput"),
@@ -357,7 +362,8 @@ var el = {
   btnStopCamera: document.getElementById("btnStopCamera"),
   readoutKmh: document.getElementById("readoutKmh"),
   readoutMph: document.getElementById("readoutMph"),
-  confidenceBadge: document.getElementById("confidenceBadge")
+  confidenceBadge: document.getElementById("confidenceBadge"),
+  measureFinePrint: document.getElementById("measureFinePrint")
 };
 
 var axialWindowRectEl = null;
@@ -379,6 +385,7 @@ var state = {
   fpsIntervalId: null,
   running: false,
   usingRVFC: false,
+  measureGen: 0,
   session: { readings: [], shootMode: "lateral", source: "live" },
   videoFileUrl: null,
   calib: {
@@ -457,6 +464,9 @@ function startCamera(){
 }
 
 function onCameraReady(){
+  // 横画面レイアウトはdata-mode(=showPanel)で#stageWrapの幅が変わるため、
+  // fitStage()が使うclientWidthを正しく測るには先にshowPanelでレイアウトを確定させる必要がある
+  showPanel("calib");
   refreshFpsBadge();
   state.fpsIntervalId = setInterval(refreshFpsBadge, 2000);
   if (el.video.videoWidth){
@@ -464,15 +474,18 @@ function onCameraReady(){
   } else {
     el.video.addEventListener("loadedmetadata", onVideoMetadata, { once: true });
   }
-  showPanel("calib");
 }
 
 function onVideoMetadata(){
+  // 新しい映像ソース(新規カメラ起動・新しい動画ファイル)なので、前回の基準点は無意味になる
+  state.calib.A = null; state.calib.B = null;
   state.videoW = el.video.videoWidth;
   state.videoH = el.video.videoHeight;
   el.overlaySvg.setAttribute("viewBox", "0 0 " + state.videoW + " " + state.videoH);
   fitStage();
   renderCalibOverlay();
+  updateSeekUI();
+  updateStartMeasureEnabled();
 }
 
 // ---------- 録画した動画ファイルからの計測 ----------
@@ -484,15 +497,15 @@ function startFileSource(file){
   state.videoFileUrl = url;
   el.video.srcObject = null;
   el.video.src = url;
+  el.fileControls.hidden = false;
+  showPanel("calib");
   if (el.video.videoWidth){
     onVideoMetadata();
   } else {
     el.video.addEventListener("loadedmetadata", onVideoMetadata, { once: true });
   }
   el.video.play().catch(function(){ /* 自動再生できなくても一時停止のまま操作してもらえばよい */ });
-  el.fileControls.hidden = false;
   updateSeekUI();
-  showPanel("calib");
 }
 
 el.btnPickVideoFile.addEventListener("click", function(){
@@ -514,6 +527,12 @@ el.video.addEventListener("timeupdate", function(){
 el.seekInput.addEventListener("input", function(){
   if (!el.video.duration || !isFinite(el.video.duration)) return;
   el.video.currentTime = parseFloat(el.seekInput.value) * el.video.duration;
+});
+el.video.addEventListener("error", function(){
+  // 後片付け(backToStart)でsrcを外してload()した際の無害なerrorは無視する
+  if (document.body.dataset.mode === "start") return;
+  showCameraError({ message: "VIDEO_LOAD_ERROR" });
+  backToStart();
 });
 el.video.addEventListener("ended", function(){
   if (state.session.source !== "file" || !state.running) return;
@@ -537,24 +556,45 @@ function formatTime(s){
   return m + ":" + pad2(sec);
 }
 
+// state.measureGenは「計測を開始しようとした試み」の世代番号。キャリブレーションやり直し/終了で
+// stopMeasureLoop()がインクリメントするため、非同期に発火する古いprobeSourceFps()のコールバックが
+// 現在の状態(シーク位置・計測ループ)を勝手に書き換えてしまう"亡霊ループ"を防ぐガードに使う。
 function probeSourceFps(callback){
+  var gen = state.measureGen;
   if (!("requestVideoFrameCallback" in HTMLVideoElement.prototype)){ callback(30); return; }
   var samples = [];
-  function probeCb(now, metadata){
-    samples.push(metadata.mediaTime);
-    if (samples.length < 8){
-      el.video.requestVideoFrameCallback(probeCb);
-      return;
-    }
+  var settled = false;
+  function fpsFromSamples(){
     var deltas = [];
     for (var i = 1; i < samples.length; i++){
       var d = samples[i] - samples[i - 1];
       if (d > 0) deltas.push(d);
     }
-    if (!deltas.length){ callback(30); return; }
+    if (!deltas.length) return 30;
     deltas.sort(function(a, b){ return a - b; });
     var median = deltas[Math.floor(deltas.length / 2)];
-    callback(median > 0 ? 1 / median : 30);
+    return median > 0 ? 1 / median : 30;
+  }
+  function finish(fps){
+    if (settled) return;
+    settled = true;
+    el.video.removeEventListener("ended", onEndedEarly);
+    if (gen !== state.measureGen) return; // 待っている間に中断/やり直しされていたら何もしない
+    callback(fps);
+  }
+  function onEndedEarly(){
+    // 8サンプル集まる前に(非常に短い動画などで)再生が終わってしまった場合のフォールバック
+    finish(fpsFromSamples());
+  }
+  el.video.addEventListener("ended", onEndedEarly, { once: true });
+  function probeCb(now, metadata){
+    if (gen !== state.measureGen) return; // 中断/やり直し後は再登録も打ち切る
+    samples.push(metadata.mediaTime);
+    if (samples.length < 8){
+      el.video.requestVideoFrameCallback(probeCb);
+      return;
+    }
+    finish(fpsFromSamples());
   }
   el.video.requestVideoFrameCallback(probeCb);
 }
@@ -562,10 +602,12 @@ function probeSourceFps(callback){
 // 動画ファイルの実フレームレートを実測し、画面のリフレッシュレートで間引かれない再生速度に自動調整してから計測を開始する
 // (iPhoneのスロー撮影は120/240fpsで記録されるが、そのまま1倍速再生すると画面表示側の間引きでフレームを取りこぼすため)
 function startFileMeasurement(){
+  var gen = state.measureGen;
   el.video.pause();
   el.video.currentTime = 0;
   el.video.play().then(function(){
     probeSourceFps(function(fps){
+      if (gen !== state.measureGen) return;
       state.actualFps = fps;
       var safeFps = 50;
       var rate = fps > safeFps ? Math.max(0.15, safeFps / fps) : 1;
@@ -573,10 +615,11 @@ function startFileMeasurement(){
       el.fpsBadge.textContent = "実測 " + Math.round(fps) + "fps" + (rate < 1 ? "(" + rate.toFixed(2) + "倍速で解析)" : "");
       el.fpsBadge.hidden = false;
       el.video.currentTime = 0;
+      el.video.play().catch(function(){});
       startMeasureLoop();
     });
   }).catch(function(){
-    startMeasureLoop();
+    if (gen === state.measureGen) startMeasureLoop();
   });
 }
 
@@ -598,6 +641,8 @@ function showCameraError(err){
     msg = "このページはHTTPS(またはlocalhost)で開かれていません。GitHub Pages等でホスティングしたURLから開いてください。";
   } else if (err.message === "UNSUPPORTED"){
     msg = "お使いのブラウザはカメラ機能に対応していません。最新のSafari(iOS)でお試しください。";
+  } else if (err.message === "VIDEO_LOAD_ERROR"){
+    msg = "動画の読み込みに失敗しました。対応していない形式か、ファイルが壊れている可能性があります。別の動画を選び直してください。";
   } else if (err.name === "NotAllowedError"){
     msg = "カメラの使用が許可されていません。設定アプリ > Safari > カメラ でこのサイトへのアクセスを許可してください。";
   } else if (err.name === "NotFoundError"){
@@ -630,6 +675,9 @@ shootModeButtons.forEach(function(btn){
   btn.addEventListener("click", function(){
     shootModeButtons.forEach(function(b){ b.classList.toggle("active", b === btn); });
     state.session.shootMode = btn.dataset.shoot;
+    // A/Bの意味がモードごとに異なる(側面=距離既知の2点、正面/背面=基準物の両端)ため、モード切替時は打ち直してもらう
+    state.calib.A = null; state.calib.B = null;
+    renderCalibOverlay();
     updateShootModeUI();
   });
 });
@@ -641,9 +689,11 @@ function updateShootModeUI(){
   if (mode === "axial"){
     el.calibLead.innerHTML = "映像上で<b>基準物の両端</b>(例: ホームベースの両端)をタップしてください(ピンはドラッグで微調整できます)。";
     el.distanceLabel.textContent = "マウンド〜プレートの距離(m)";
+    el.lateralPreview.hidden = true; // 他方のモードのヒントは残さない
   } else {
     el.calibLead.innerHTML = "映像上で<b>基準点A</b>と<b>基準点B</b>をタップしてください(実距離が分かっている2点。ピンはドラッグで微調整できます)。";
     el.distanceLabel.textContent = "A-B間の実距離(m)";
+    el.axialPreview.hidden = true; // 他方のモードのヒントは残さない
   }
   updateDistanceFieldVisibility();
   updateStartMeasureEnabled();
@@ -651,7 +701,9 @@ function updateShootModeUI(){
 
 function updateDistanceFieldVisibility(){
   var mode = state.session.shootMode;
-  el.distanceFieldRow.hidden = (mode === "axial" && state.calib.measurementWindowMode !== "fullBaseline");
+  var fullBaseline = state.calib.measurementWindowMode === "fullBaseline";
+  el.distanceFieldRow.hidden = (mode === "axial" && !fullBaseline);
+  el.axialOffsetFieldRow.hidden = (mode === "axial" && fullBaseline);
 }
 
 // ---------- キャリブレーション: 座標変換 ----------
@@ -751,16 +803,21 @@ segButtons.forEach(function(btn){
       state.calib.ballDiameterM = BALL_PRESETS[kind].diam;
       state.calib.ballColor = BALL_PRESETS[kind].color;
     } else {
-      state.calib.ballDiameterM = (parseFloat(el.ballDiameterInput.value) || 7.3) / 100;
+      state.calib.ballDiameterM = positiveOr(el.ballDiameterInput.value, 7.3) / 100;
       state.calib.ballColor = el.ballColorInput.value;
     }
     updateStartMeasureEnabled();
   });
 });
 el.ballDiameterInput.addEventListener("input", function(){
-  state.calib.ballDiameterM = (parseFloat(el.ballDiameterInput.value) || 7.3) / 100;
+  state.calib.ballDiameterM = positiveOr(el.ballDiameterInput.value, 7.3) / 100;
   updateStartMeasureEnabled();
 });
+// parseFloatの結果が正の有限値でなければデフォルト値にフォールバックする(0以下・NaN・負値を弾く)
+function positiveOr(value, fallback){
+  var v = parseFloat(value);
+  return (isFinite(v) && v > 0) ? v : fallback;
+}
 el.ballColorInput.addEventListener("change", function(){
   state.calib.ballColor = el.ballColorInput.value;
 });
@@ -776,13 +833,13 @@ refTypeButtons.forEach(function(btn){
     if (kind !== "custom"){
       state.calib.refRealWidth_m = REF_PRESETS[kind];
     } else {
-      state.calib.refRealWidth_m = parseFloat(el.refWidthInput.value) || 0.4318;
+      state.calib.refRealWidth_m = positiveOr(el.refWidthInput.value, 0.4318);
     }
     updateStartMeasureEnabled();
   });
 });
 el.refWidthInput.addEventListener("input", function(){
-  state.calib.refRealWidth_m = parseFloat(el.refWidthInput.value) || 0.4318;
+  state.calib.refRealWidth_m = positiveOr(el.refWidthInput.value, 0.4318);
   updateStartMeasureEnabled();
 });
 el.camToRefInput.addEventListener("input", function(){
@@ -812,12 +869,23 @@ function updateAxialPreview(){
   }
   var refPx = dist(A, B);
   if (refPx <= 0){ el.axialPreview.hidden = true; return false; }
+  if (state.calib.measurementWindowMode !== "fullBaseline" && (state.calib.offset_m || 0) <= 0){
+    el.axialPreview.hidden = false;
+    el.axialPreview.className = "calib-hint hint-bad";
+    el.axialPreview.textContent = "判定区間(奥側までの追加距離)は0より大きい値にしてください。";
+    return false;
+  }
   var focalLength_px = refPx * state.calib.camToRef_m / state.calib.refRealWidth_m;
   var K = focalLength_px * state.calib.ballDiameterM;
   var farGate_m = state.calib.measurementWindowMode === "fullBaseline"
     ? state.calib.camToRef_m + (state.calib.distanceM || 0)
     : state.calib.camToRef_m + (state.calib.offset_m || 0);
-  if (farGate_m <= 0){ el.axialPreview.hidden = true; return false; }
+  if (farGate_m <= 0 || Math.abs(farGate_m - state.calib.camToRef_m) < 1e-6){
+    el.axialPreview.hidden = false;
+    el.axialPreview.className = "calib-hint hint-bad";
+    el.axialPreview.textContent = "判定区間の奥行きが0になっています。距離設定を見直してください。";
+    return false;
+  }
   var diamFar = K / farGate_m;
   var cls, msg, ok;
   if (diamFar >= AXIAL_CONF_GREEN_PX){
@@ -837,14 +905,54 @@ function updateAxialPreview(){
   return ok;
 }
 
+// 側面〜斜めモード: A-B間のタップがほぼ同一点、またはボールが小さく写りすぎる設定を検出して警告する
+function updateLateralPreview(){
+  var A = state.calib.A, B = state.calib.B;
+  if (!A || !B || !(state.calib.distanceM > 0) || !(state.calib.ballDiameterM > 0)){
+    el.lateralPreview.hidden = true;
+    return false;
+  }
+  var lengthPx = dist(A, B);
+  var MIN_LENGTH_PX = 20;
+  if (lengthPx < MIN_LENGTH_PX){
+    el.lateralPreview.hidden = false;
+    el.lateralPreview.className = "calib-hint hint-bad";
+    el.lateralPreview.textContent = "基準点A・Bが近すぎます。もっと離れた2点をタップし直してください。";
+    return false;
+  }
+  var metersPerPixel = state.calib.distanceM / lengthPx;
+  var expectedBallPx = state.calib.ballDiameterM / metersPerPixel;
+  if (expectedBallPx < 1.5){
+    el.lateralPreview.hidden = false;
+    el.lateralPreview.className = "calib-hint hint-bad";
+    el.lateralPreview.textContent = "この設定だとボールが小さく写りすぎて検出できません(想定直径: " + expectedBallPx.toFixed(1) + "px)。基準点をもっと離すか、カメラをボールの軌道に近づけてください。";
+    return false;
+  }
+  el.lateralPreview.hidden = true;
+  return true;
+}
+
 function updateStartMeasureEnabled(){
   if (state.session.shootMode === "axial"){
-    var basicOk = state.calib.A && state.calib.B && state.calib.refRealWidth_m > 0 && state.calib.camToRef_m > 0;
-    var previewOk = basicOk ? updateAxialPreview() : false;
+    var basicOk = state.calib.A && state.calib.B && state.calib.refRealWidth_m > 0 && state.calib.camToRef_m > 0 && state.calib.ballDiameterM > 0;
+    var previewOk;
+    if (basicOk){
+      previewOk = updateAxialPreview();
+    } else {
+      el.axialPreview.hidden = true;
+      previewOk = false;
+    }
     el.btnStartMeasure.disabled = !(basicOk && previewOk);
   } else {
-    var ok = state.calib.A && state.calib.B && state.calib.distanceM > 0;
-    el.btnStartMeasure.disabled = !ok;
+    var basicOkLateral = state.calib.A && state.calib.B && state.calib.distanceM > 0 && state.calib.ballDiameterM > 0;
+    var previewOkLateral;
+    if (basicOkLateral){
+      previewOkLateral = updateLateralPreview();
+    } else {
+      el.lateralPreview.hidden = true;
+      previewOkLateral = false;
+    }
+    el.btnStartMeasure.disabled = !(basicOkLateral && previewOkLateral);
   }
 }
 
@@ -941,7 +1049,10 @@ function computeAxialSetup(){
     A: A, B: B,
     focalLength_px: focalLength_px, K_px_m: K_px_m,
     nearGate_m: nearGate_m, farGate_m: farGate_m,
-    fallbackDiamPx: fallbackDiamPx,
+    // fallbackDiamPxは解析キャンバス(縮小後)のピクセル単位で統一する。
+    // ネイティブ動画解像度の値のまま使うと、動画ファイル(1080p/4K等、scaleが小さい)で
+    // filterCandidatesBySize()のサイズ判定が常に不成立になり検出が恒久的に失敗するバグになっていた。
+    fallbackDiamPx: fallbackDiamPx * scale,
     scale: scale, canvasW: canvasW, canvasH: canvasH,
     initCx: midX * scale, initCy: midY * scale,
     canvas: null, ctx: null
@@ -1076,6 +1187,12 @@ function registerMiss(){
     state.detect.lastTrack = null; state.detect.vx = 0; state.detect.vy = 0;
     state.detect.sizeEma = null; state.detect.sizeEmaN = 0;
     state.detect.track = [];
+    // 探索ウィンドウが前回検出位置に狭く追従したまま残ると、見失った後の再出現位置が
+    // ウィンドウ外にある場合に検出が恒久的にスタックするため、追跡を打ち切るタイミングで広げ直す
+    if (state.session.shootMode === "axial" && state.axial){
+      state.detect.searchWindow = { cx: state.axial.initCx, cy: state.axial.initCy, size: Math.max(state.axial.fallbackDiamPx * 6, 100) };
+      updateAxialWindowOverlay();
+    }
   }
   updateDetectDot(false);
 }
@@ -1189,7 +1306,10 @@ function handleGateEvent(gate, t, confident){
 function finalizeAxialReading(){
   var ax = state.axial;
   var pts = state.detect.track.filter(function(s){ return s.diam >= AXIAL_DIAM_FLOOR_PX; });
-  if (pts.length < MIN_AXIAL_SAMPLES) return;
+  if (pts.length < MIN_AXIAL_SAMPLES){
+    showAxialLowSignalNotice();
+    return;
+  }
 
   // 重み付き最小二乗: 1/diam = a*t + b (重み = diam^4 で、精度の高い近距離側サンプルを強く効かせる)
   var sw = 0, swx = 0, swy = 0, swxx = 0, swxy = 0;
@@ -1295,7 +1415,7 @@ function exportCsv(){
   a.href = url;
   a.download = "球速ログ_" + stamp + ".csv";
   document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000); // ダウンロード開始を待ってから解放する(即時revokeだと環境によっては競合しうる)
 }
 function pad2(n){ return n < 10 ? "0" + n : "" + n; }
 
@@ -1414,6 +1534,7 @@ function onRaf(){
   requestAnimationFrame(onRaf);
 }
 function startMeasureLoop(){
+  if (state.running) return; // 二重起動防止(既にループが走っている場合は何もしない)
   state.running = true;
   if ("requestVideoFrameCallback" in HTMLVideoElement.prototype){
     state.usingRVFC = true;
@@ -1425,12 +1546,14 @@ function startMeasureLoop(){
 }
 function stopMeasureLoop(){
   state.running = false;
+  state.measureGen++; // 進行中の非同期処理(fps実測プローブ等)を無効化する
 }
 
 // ---------- ボタン類 ----------
 el.btnStartCamera.addEventListener("click", startCamera);
 
 el.btnStartMeasure.addEventListener("click", function(){
+  stopMeasureLoop(); // 念のため既存のループを止め、世代を進めてから新規計測に入る
   if (state.session.shootMode === "axial"){
     state.axial = computeAxialSetup();
     setupAxialCanvas();
@@ -1449,6 +1572,7 @@ el.btnStartMeasure.addEventListener("click", function(){
   showPanel("measure");
   renderMeasureOverlay();
   updateStopButtonLabel();
+  updateMeasureFinePrint();
   if (state.session.source === "file"){
     startFileMeasurement();
   } else {
@@ -1458,6 +1582,12 @@ el.btnStartMeasure.addEventListener("click", function(){
 
 function updateStopButtonLabel(){
   el.btnStopCamera.textContent = state.session.source === "file" ? "終了して選び直す" : "カメラ停止";
+}
+
+function updateMeasureFinePrint(){
+  el.measureFinePrint.textContent = state.session.shootMode === "axial"
+    ? "正面/背面モードの表示速度は、ボールの見かけサイズの変化から回帰計算した推定値です(遠方ほど誤差が大きくなります)。薄く表示される数値は「低信頼」の測定です。"
+    : "側面〜斜めモードの表示速度は基準点間の平均速度です(区間内の減速は無視できる範囲として計算)。薄く表示される数値は「低信頼」の測定です。";
 }
 
 el.sensitivityInput.addEventListener("input", function(){
@@ -1473,23 +1603,36 @@ el.btnRecalibrate.addEventListener("click", function(){
     el.video.pause();
     updateSeekUI();
   }
+  el.fpsBadge.hidden = true;
+  el.fpsBadge.textContent = "";
   showPanel("calib");
   renderCalibOverlay();
 });
 
-el.btnStopCamera.addEventListener("click", function(){
+// カメラ/動画ソースと計測状態をすべて後片付けして開始画面へ戻す(「カメラ停止」「終了して選び直す」「開始画面に戻る」で共通)
+function backToStart(){
   stopMeasureLoop();
   if (state.fpsIntervalId){ clearInterval(state.fpsIntervalId); state.fpsIntervalId = null; }
   if (state.stream){ state.stream.getTracks().forEach(function(tr){ tr.stop(); }); state.stream = null; }
   if (state.videoFileUrl){ URL.revokeObjectURL(state.videoFileUrl); state.videoFileUrl = null; }
   el.video.pause();
   el.video.removeAttribute("src");
+  el.video.srcObject = null;
   el.video.load();
   el.video.playbackRate = 1;
   state.session.source = "live";
+  state.calib.A = null; state.calib.B = null;
+  state.dragging = null;
   el.fileControls.hidden = true;
   el.fpsBadge.hidden = true;
+  el.fpsBadge.textContent = "";
   showPanel("start");
+}
+
+el.btnStopCamera.addEventListener("click", backToStart);
+el.btnBackToStart.addEventListener("click", function(){
+  el.startError.hidden = true;
+  backToStart();
 });
 
 })();
