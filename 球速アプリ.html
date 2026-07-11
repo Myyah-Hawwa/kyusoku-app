@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1b2a4a">
+<title>球速アプリ ｜ リアルタイム球速計</title>
+<style>
+:root{
+  --paper:#fbfbf7;
+  --grid: rgba(27,42,74,.06);
+  --grid-major: rgba(27,42,74,.12);
+  --ink:#1b2a4a;
+  --ink-soft:#5b6b85;
+  --ink-faint:#93a0b5;
+  --line:#dfe3ea;
+  --card:#ffffff;
+  --accent:#c5303a;
+  --accent-soft: rgba(197,48,58,.12);
+  --radius:14px;
+  --shadow-sm:0 1px 0 rgba(27,42,74,.04), 0 3px 8px rgba(27,42,74,.06);
+  --shadow:0 1px 0 rgba(27,42,74,.05), 0 8px 20px rgba(27,42,74,.09);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;height:100%;}
+body{
+  font-family:"Yu Gothic","游ゴシック",YuGothic,"Hiragino Kaku Gothic ProN","Hiragino Sans",Meiryo,system-ui,sans-serif;
+  color:var(--ink);
+  background-color:var(--paper);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    linear-gradient(var(--grid-major) 1.5px, transparent 1.5px),
+    linear-gradient(90deg, var(--grid-major) 1.5px, transparent 1.5px);
+  background-size:24px 24px, 24px 24px, 120px 120px, 120px 120px;
+  background-position:-1px -1px;
+  background-attachment:fixed;
+  -webkit-font-smoothing:antialiased;
+  line-height:1.5;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+button{font-family:inherit;color:inherit;cursor:pointer;}
+input,select{font-family:inherit;}
+h1{font-size:1.05rem;margin:0;font-weight:800;letter-spacing:.02em;}
+
+#app{max-width:640px;margin:0 auto;padding:14px 14px 40px;}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 12px;}
+.fps-badge{font-size:.72rem;font-weight:700;color:var(--ink-soft);background:var(--card);border:1px solid var(--line);border-radius:99px;padding:3px 10px;}
+
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:16px;margin-bottom:14px;}
+.lead{margin:0 0 12px;font-size:.94rem;font-weight:600;}
+.hint-list{margin:0 0 14px;padding-left:1.2em;font-size:.82rem;color:var(--ink-soft);font-weight:600;}
+.hint-list li{margin-bottom:4px;}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:11px;padding:12px 18px;font-size:.95rem;font-weight:800;width:100%;transition:transform .12s, opacity .12s;}
+.btn:active{transform:scale(.98);}
+.btn-primary{background:var(--ink);color:#fff;box-shadow:0 4px 10px rgba(27,42,74,.28);}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed;}
+.btn-ghost{background:var(--paper);color:var(--ink-soft);border:1.4px solid var(--line);font-weight:700;}
+.btn-sm{width:auto;padding:6px 12px;font-size:.76rem;}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;}
+.btn-row .btn{width:auto;flex:1 1 auto;}
+
+.error-text{margin:10px 0 0;font-size:.84rem;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:10px;padding:10px 12px;}
+
+#stageWrap{width:100%;}
+#stage{position:relative;background:#000;border-radius:var(--radius);overflow:hidden;margin:0 auto 14px;box-shadow:var(--shadow);}
+#stage video{width:100%;height:100%;object-fit:fill;display:block;}
+.overlay-svg{position:absolute;inset:0;width:100%;height:100%;}
+.calib-pin{fill:var(--accent-soft);stroke:var(--accent);stroke-width:3;}
+.calib-pin.pin-A{stroke:#3C82C6;fill:rgba(60,130,198,.18);}
+.calib-pin.pin-B{stroke:var(--accent);fill:var(--accent-soft);}
+.calib-label{font-size:26px;font-weight:800;fill:#fff;paint-order:stroke;stroke:rgba(0,0,0,.55);stroke-width:6px;text-anchor:middle;}
+.calib-line{stroke:rgba(255,255,255,.8);stroke-width:2;stroke-dasharray:10 8;}
+.corridor-poly{fill:rgba(197,48,58,.14);stroke:rgba(197,48,58,.6);stroke-width:2;}
+
+.detect-dot{position:absolute;top:10px;right:10px;width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.35);border:2px solid rgba(255,255,255,.6);transition:background .15s;}
+.detect-dot.active{background:var(--ink);border-color:#fff;}
+.detect-dot.flash{background:var(--accent);border-color:#fff;animation:dotFlash .35s ease;}
+@keyframes dotFlash{0%{transform:scale(1);}50%{transform:scale(1.6);}100%{transform:scale(1);}}
+
+.field-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+.field-row label{font-size:.82rem;font-weight:700;color:var(--ink-soft);}
+.field-row input[type="number"]{width:6.5em;padding:8px 10px;border:1.4px solid var(--line);border-radius:9px;font-size:.95rem;font-weight:700;color:var(--ink);}
+.field-row select{padding:8px 10px;border:1.4px solid var(--line);border-radius:9px;font-size:.88rem;font-weight:700;}
+.field-label{font-size:.82rem;font-weight:700;color:var(--ink-soft);width:100%;}
+.chip{border:1.4px solid var(--line);background:var(--paper);border-radius:99px;padding:7px 13px;font-size:.78rem;font-weight:700;color:var(--ink-soft);}
+.chip:active{background:var(--line);}
+
+.segmented{display:flex;gap:6px;width:100%;flex-wrap:wrap;}
+.seg-btn{flex:1 1 auto;border:1.4px solid var(--line);background:var(--paper);border-radius:9px;padding:9px 8px;font-size:.78rem;font-weight:700;color:var(--ink-soft);}
+.seg-btn.active{background:var(--ink);border-color:var(--ink);color:#fff;}
+.custom-ball{width:100%;padding-top:6px;}
+.custom-ball label{display:flex;flex-direction:column;gap:4px;font-size:.76rem;}
+
+input[type="range"]{width:100%;}
+
+.readout{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 0 16px;}
+.readout-value{font-size:clamp(3.2rem,17vw,4.8rem);font-weight:800;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink);}
+.readout-value.low-confidence{color:var(--ink-faint);}
+.readout-value.pop{animation:speedPop .4s cubic-bezier(.2,.8,.25,1.2);}
+@keyframes speedPop{0%{transform:scale(.75);opacity:0;}55%{transform:scale(1.12);opacity:1;}100%{transform:scale(1);opacity:1;}}
+.readout-unit{font-size:.85rem;font-weight:800;color:var(--ink-soft);letter-spacing:.04em;}
+.readout-sub{font-size:.78rem;font-weight:700;color:var(--ink-faint);}
+
+.history-wrap{border-top:1.4px dashed var(--line);margin-top:8px;padding-top:10px;}
+.history-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.history-head span{font-size:.8rem;font-weight:800;color:var(--ink-soft);}
+.history-list{list-style:none;margin:0;padding:0;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;}
+.history-item{display:flex;align-items:center;gap:10px;background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:.82rem;font-weight:700;}
+.history-item.low-confidence{opacity:.55;}
+.hi-time{color:var(--ink-faint);font-variant-numeric:tabular-nums;font-weight:600;flex:0 0 auto;}
+.hi-speed{color:var(--ink);font-variant-numeric:tabular-nums;flex:1 1 auto;}
+.hi-mph{color:var(--ink-faint);font-variant-numeric:tabular-nums;font-weight:600;flex:0 0 auto;}
+
+.fine-print{font-size:.72rem;color:var(--ink-faint);font-weight:600;margin-top:12px;line-height:1.6;}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation:none !important;transition:none !important;}
+}
+</style>
+</head>
+<body data-mode="start">
+<div id="app">
+  <div class="topbar">
+    <h1>球速アプリ</h1>
+    <span class="fps-badge" id="fpsBadge" hidden></span>
+  </div>
+
+  <section id="panelStart" class="panel">
+    <p class="lead">iPhoneのカメラでボールの通過速度を計測します。三脚などで固定し、投球経路を<b>横から(側面)</b>映してください。</p>
+    <ul class="hint-list">
+      <li>ネット越し・正面からの撮影には対応していません(側面撮影専用)</li>
+      <li>カメラ映像は端末の外へ送信されません</li>
+      <li>この機能はHTTPS配信のページでのみ動作します(file://では起動できません)</li>
+    </ul>
+    <button id="btnStartCamera" class="btn btn-primary">カメラを起動</button>
+    <p id="startError" class="error-text" hidden></p>
+  </section>
+
+  <div id="stageWrap">
+    <div id="stage" hidden>
+      <video id="video" playsinline muted></video>
+      <svg id="overlaySvg" class="overlay-svg"></svg>
+      <div id="detectDot" class="detect-dot"></div>
+    </div>
+  </div>
+
+  <section id="panelCalib" class="panel" hidden>
+    <p class="lead">映像上で<b>基準点A</b>と<b>基準点B</b>をタップしてください(実距離が分かっている2点。ピンはドラッグで微調整できます)。</p>
+    <div class="field-row">
+      <label for="distanceInput">A-B間の実距離(m)</label>
+      <input type="number" id="distanceInput" step="0.01" min="0.5" value="18.44">
+      <button type="button" class="chip" id="chipStdDistance">硬式・一般 18.44m</button>
+    </div>
+    <div class="field-row">
+      <span class="field-label">ボール種類</span>
+      <div class="segmented" id="ballTypeSeg">
+        <button type="button" class="seg-btn active" data-ball="baseball">野球球(白・7.3cm)</button>
+        <button type="button" class="seg-btn" data-ball="softball">ソフトボール(黄・9.7cm)</button>
+        <button type="button" class="seg-btn" data-ball="custom">カスタム</button>
+      </div>
+      <div class="custom-ball" id="customBallFields" hidden>
+        <label>直径(cm)<input type="number" id="ballDiameterInput" value="7.3" step="0.1" min="1"></label>
+        <label>色の傾向
+          <select id="ballColorInput">
+            <option value="white">白系</option>
+            <option value="yellow">黄系</option>
+            <option value="auto">自動(色を問わない)</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="btnResetPoints" class="btn btn-ghost">基準点をやり直す</button>
+      <button type="button" id="btnStartMeasure" class="btn btn-primary" disabled>計測開始</button>
+    </div>
+  </section>
+
+  <section id="panelMeasure" class="panel" hidden>
+    <div class="readout">
+      <div class="readout-value" id="readoutKmh">--</div>
+      <div class="readout-unit">km/h</div>
+      <div class="readout-sub" id="readoutMph"></div>
+    </div>
+    <div class="field-row">
+      <label for="sensitivityInput">感度</label>
+      <input type="range" id="sensitivityInput" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="history-wrap">
+      <div class="history-head">
+        <span>計測履歴(このセッションのみ)</span>
+        <button type="button" id="btnExportCsv" class="btn btn-ghost btn-sm">CSV書き出し</button>
+      </div>
+      <ol id="historyList" class="history-list"></ol>
+    </div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button type="button" id="btnRecalibrate" class="btn btn-ghost">キャリブレーションやり直し</button>
+      <button type="button" id="btnStopCamera" class="btn btn-ghost">カメラ停止</button>
+    </div>
+    <p class="fine-print">表示速度は基準点A-B間の平均速度です(区間内の減速は無視できる範囲として計算)。薄く表示される数値は前後フレームの検出が途切れた「低信頼」の測定です。</p>
+  </section>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var MIN_SPEED_KMH = 20;
+var MAX_SPEED_KMH = 170;
+var BG_ALPHA = 0.12;
+var MAX_TRANSIT_S = 3.0;
+var MIN_CONSEC_VALID = 2;
+var svgNS = "http://www.w3.org/2000/svg";
+
+var el = {
+  fpsBadge: document.getElementById("fpsBadge"),
+  panelStart: document.getElementById("panelStart"),
+  panelCalib: document.getElementById("panelCalib"),
+  panelMeasure: document.getElementById("panelMeasure"),
+  stage: document.getElementById("stage"),
+  stageWrap: document.getElementById("stageWrap"),
+  video: document.getElementById("video"),
+  overlaySvg: document.getElementById("overlaySvg"),
+  detectDot: document.getElementById("detectDot"),
+  btnStartCamera: document.getElementById("btnStartCamera"),
+  startError: document.getElementById("startError"),
+  distanceInput: document.getElementById("distanceInput"),
+  chipStdDistance: document.getElementById("chipStdDistance"),
+  ballTypeSeg: document.getElementById("ballTypeSeg"),
+  customBallFields: document.getElementById("customBallFields"),
+  ballDiameterInput: document.getElementById("ballDiameterInput"),
+  ballColorInput: document.getElementById("ballColorInput"),
+  btnResetPoints: document.getElementById("btnResetPoints"),
+  btnStartMeasure: document.getElementById("btnStartMeasure"),
+  sensitivityInput: document.getElementById("sensitivityInput"),
+  historyList: document.getElementById("historyList"),
+  btnExportCsv: document.getElementById("btnExportCsv"),
+  btnRecalibrate: document.getElementById("btnRecalibrate"),
+  btnStopCamera: document.getElementById("btnStopCamera"),
+  readoutKmh: document.getElementById("readoutKmh"),
+  readoutMph: document.getElementById("readoutMph")
+};
+
+var BALL_PRESETS = {
+  baseball: { diam: 0.073, color: "white" },
+  softball: { diam: 0.097, color: "yellow" }
+};
+
+var state = {
+  stream: null,
+  videoW: 0,
+  videoH: 0,
+  actualFps: 30,
+  fpsIntervalId: null,
+  running: false,
+  usingRVFC: false,
+  calib: {
+    A: null,
+    B: null,
+    distanceM: 18.44,
+    ballDiameterM: BALL_PRESETS.baseball.diam,
+    ballColor: BALL_PRESETS.baseball.color
+  },
+  corridor: null,
+  detect: {
+    sensitivity: 0.5,
+    bg: null,
+    prevMeanLum: null,
+    lastTrack: null,
+    vx: 0,
+    vy: 0,
+    missStreak: 0,
+    consecValid: 0,
+    sHistory: [],
+    pendingCross: null,
+    _lumaBuf: null,
+    _maskBuf: null
+  },
+  session: { readings: [] },
+  dragging: null
+};
+
+// ---------- 画面遷移 ----------
+function showPanel(name){
+  document.body.dataset.mode = name;
+  el.panelStart.hidden = name !== "start";
+  el.panelCalib.hidden = name !== "calib";
+  el.panelMeasure.hidden = name !== "measure";
+  el.stage.hidden = name === "start";
+}
+
+// ---------- カメラ起動 ----------
+function startCamera(){
+  el.startError.hidden = true;
+  if (!window.isSecureContext){
+    showCameraError({ message: "INSECURE_CONTEXT" });
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    showCameraError({ message: "UNSUPPORTED" });
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      frameRate: { ideal: 60, min: 24 }
+    },
+    audio: false
+  }).then(function(stream){
+    state.stream = stream;
+    el.video.srcObject = stream;
+    return el.video.play();
+  }).then(function(){
+    onCameraReady();
+  }).catch(function(err){
+    showCameraError(err);
+  });
+}
+
+function onCameraReady(){
+  refreshFpsBadge();
+  state.fpsIntervalId = setInterval(refreshFpsBadge, 2000);
+  if (el.video.videoWidth){
+    onVideoMetadata();
+  } else {
+    el.video.addEventListener("loadedmetadata", onVideoMetadata, { once: true });
+  }
+  showPanel("calib");
+}
+
+function onVideoMetadata(){
+  state.videoW = el.video.videoWidth;
+  state.videoH = el.video.videoHeight;
+  el.overlaySvg.setAttribute("viewBox", "0 0 " + state.videoW + " " + state.videoH);
+  fitStage();
+  renderCalibOverlay();
+}
+
+function refreshFpsBadge(){
+  if (!state.stream) return;
+  var track = state.stream.getVideoTracks()[0];
+  if (!track) return;
+  var settings = track.getSettings();
+  if (settings.frameRate){
+    state.actualFps = settings.frameRate;
+    el.fpsBadge.textContent = "実測 " + Math.round(settings.frameRate) + "fps";
+    el.fpsBadge.hidden = false;
+  }
+}
+
+function showCameraError(err){
+  var msg;
+  if (err.message === "INSECURE_CONTEXT"){
+    msg = "このページはHTTPS(またはlocalhost)で開かれていません。GitHub Pages等でホスティングしたURLから開いてください。";
+  } else if (err.message === "UNSUPPORTED"){
+    msg = "お使いのブラウザはカメラ機能に対応していません。最新のSafari(iOS)でお試しください。";
+  } else if (err.name === "NotAllowedError"){
+    msg = "カメラの使用が許可されていません。設定アプリ > Safari > カメラ でこのサイトへのアクセスを許可してください。";
+  } else if (err.name === "NotFoundError"){
+    msg = "カメラが見つかりませんでした。";
+  } else {
+    msg = "カメラの起動に失敗しました(" + (err.name || err.message || err) + ")。";
+  }
+  el.startError.textContent = msg;
+  el.startError.hidden = false;
+}
+
+function fitStage(){
+  if (!state.videoW || !state.videoH) return;
+  var availW = el.stageWrap.clientWidth;
+  var availH = Math.min(window.innerHeight * 0.5, 520);
+  var aspect = state.videoW / state.videoH;
+  var w = availW, h = w / aspect;
+  if (h > availH){ h = availH; w = h * aspect; }
+  el.stage.style.width = w + "px";
+  el.stage.style.height = h + "px";
+}
+window.addEventListener("resize", fitStage);
+
+// ---------- キャリブレーション: 座標変換 ----------
+function svgPointFromEvent(evt){
+  var pt = el.overlaySvg.createSVGPoint();
+  var t = (evt.touches && evt.touches[0]) ? evt.touches[0] : evt;
+  pt.x = t.clientX; pt.y = t.clientY;
+  var ctm = el.overlaySvg.getScreenCTM();
+  if (!ctm) return null;
+  var loc = pt.matrixTransform(ctm.inverse());
+  return { x: loc.x, y: loc.y };
+}
+function dist(p1, p2){ return Math.hypot(p1.x - p2.x, p1.y - p2.y); }
+function hitRadius(){ return state.videoW * 0.06; }
+
+el.overlaySvg.style.touchAction = "none";
+el.overlaySvg.addEventListener("pointerdown", function(e){
+  if (document.body.dataset.mode !== "calib") return;
+  var pt = svgPointFromEvent(e);
+  if (!pt) return;
+  var nearA = state.calib.A && dist(pt, state.calib.A) < hitRadius();
+  var nearB = state.calib.B && dist(pt, state.calib.B) < hitRadius();
+  if (nearA){ state.dragging = "A"; }
+  else if (nearB){ state.dragging = "B"; }
+  else if (!state.calib.A){ state.calib.A = pt; state.dragging = "A"; }
+  else if (!state.calib.B){ state.calib.B = pt; state.dragging = "B"; }
+  else { return; }
+  try { el.overlaySvg.setPointerCapture(e.pointerId); } catch (err) { /* キャプチャ失敗時も描画/有効化は続行する */ }
+  renderCalibOverlay();
+  updateStartMeasureEnabled();
+});
+el.overlaySvg.addEventListener("pointermove", function(e){
+  if (!state.dragging) return;
+  var pt = svgPointFromEvent(e);
+  if (!pt) return;
+  state.calib[state.dragging] = pt;
+  renderCalibOverlay();
+});
+el.overlaySvg.addEventListener("pointerup", function(){ state.dragging = null; });
+el.overlaySvg.addEventListener("pointercancel", function(){ state.dragging = null; });
+
+function clearSvg(){
+  while (el.overlaySvg.firstChild) el.overlaySvg.removeChild(el.overlaySvg.firstChild);
+}
+
+function renderCalibOverlay(){
+  if (document.body.dataset.mode !== "calib") return;
+  clearSvg();
+  var A = state.calib.A, B = state.calib.B;
+  if (A && B){
+    var line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", A.x); line.setAttribute("y1", A.y);
+    line.setAttribute("x2", B.x); line.setAttribute("y2", B.y);
+    line.setAttribute("class", "calib-line");
+    el.overlaySvg.appendChild(line);
+  }
+  [["A", A], ["B", B]].forEach(function(pair){
+    var key = pair[0], pt = pair[1];
+    if (!pt) return;
+    var c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y);
+    c.setAttribute("r", state.videoW * 0.02);
+    c.setAttribute("class", "calib-pin pin-" + key);
+    el.overlaySvg.appendChild(c);
+    var label = document.createElementNS(svgNS, "text");
+    label.setAttribute("x", pt.x); label.setAttribute("y", pt.y - state.videoW * 0.035);
+    label.setAttribute("class", "calib-label");
+    label.textContent = key;
+    el.overlaySvg.appendChild(label);
+  });
+}
+
+el.btnResetPoints.addEventListener("click", function(){
+  state.calib.A = null; state.calib.B = null;
+  renderCalibOverlay();
+  updateStartMeasureEnabled();
+});
+
+el.distanceInput.addEventListener("input", function(){
+  state.calib.distanceM = parseFloat(el.distanceInput.value) || 0;
+  updateStartMeasureEnabled();
+});
+el.chipStdDistance.addEventListener("click", function(){
+  el.distanceInput.value = "18.44";
+  state.calib.distanceM = 18.44;
+  updateStartMeasureEnabled();
+});
+
+var segButtons = Array.prototype.slice.call(el.ballTypeSeg.querySelectorAll(".seg-btn"));
+segButtons.forEach(function(btn){
+  btn.addEventListener("click", function(){
+    segButtons.forEach(function(b){ b.classList.toggle("active", b === btn); });
+    var kind = btn.dataset.ball;
+    el.customBallFields.hidden = kind !== "custom";
+    if (kind !== "custom"){
+      state.calib.ballDiameterM = BALL_PRESETS[kind].diam;
+      state.calib.ballColor = BALL_PRESETS[kind].color;
+    } else {
+      state.calib.ballDiameterM = (parseFloat(el.ballDiameterInput.value) || 7.3) / 100;
+      state.calib.ballColor = el.ballColorInput.value;
+    }
+  });
+});
+el.ballDiameterInput.addEventListener("input", function(){
+  state.calib.ballDiameterM = (parseFloat(el.ballDiameterInput.value) || 7.3) / 100;
+});
+el.ballColorInput.addEventListener("change", function(){
+  state.calib.ballColor = el.ballColorInput.value;
+});
+
+function updateStartMeasureEnabled(){
+  var ok = state.calib.A && state.calib.B && state.calib.distanceM > 0;
+  el.btnStartMeasure.disabled = !ok;
+}
+
+// ---------- コリドー(解析回廊)の幾何計算 ----------
+function computeCorridor(){
+  var A = state.calib.A, B = state.calib.B;
+  var dx = B.x - A.x, dy = B.y - A.y;
+  var lengthPx = Math.hypot(dx, dy);
+  var angle = Math.atan2(dy, dx);
+  var metersPerPixel = state.calib.distanceM / lengthPx;
+  var expectedBallPx = state.calib.ballDiameterM / metersPerPixel;
+  var marginPx = expectedBallPx * 2.5;
+  var widthPx = Math.max(expectedBallPx * 2.4, 18);
+  var rawLen = lengthPx + marginPx * 2;
+  var scale = Math.min(1, 260 / rawLen);
+  var canvasW = Math.max(32, Math.round(rawLen * scale));
+  var canvasH = Math.max(16, Math.round(widthPx * scale));
+  var cosA = Math.cos(angle), sinA = Math.sin(angle);
+  var originX = A.x - cosA * marginPx;
+  var originY = A.y - sinA * marginPx;
+  return {
+    A: A, B: B, angle: angle, lengthPx: lengthPx, widthPx: widthPx,
+    marginPx: marginPx, metersPerPixel: metersPerPixel, expectedBallPx: expectedBallPx,
+    scale: scale, canvasW: canvasW, canvasH: canvasH,
+    originX: originX, originY: originY,
+    canvas: null, ctx: null
+  };
+}
+
+function setupCorridorCanvas(){
+  var c = document.createElement("canvas");
+  c.width = state.corridor.canvasW;
+  c.height = state.corridor.canvasH;
+  state.corridor.canvas = c;
+  state.corridor.ctx = c.getContext("2d", { willReadFrequently: true });
+}
+
+// video座標系(視野そのまま)を回転させ、コリドー沿いを横一列にしてcanvasへ焼き込む変換
+function drawCorridorFrame(){
+  var cor = state.corridor, ctx = cor.ctx;
+  var cosA = Math.cos(cor.angle), sinA = Math.sin(cor.angle);
+  var a = cor.scale * cosA, b = -cor.scale * sinA;
+  var c = cor.scale * sinA, d = cor.scale * cosA;
+  var e = -a * cor.originX - c * cor.originY;
+  var f = cor.scale * cor.widthPx / 2 - b * cor.originX - d * cor.originY;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cor.canvasW, cor.canvasH);
+  ctx.setTransform(a, b, c, d, e, f);
+  ctx.drawImage(el.video, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function corridorPolygonPoints(cor){
+  var ax = Math.cos(cor.angle), ay = Math.sin(cor.angle);
+  var px = -Math.sin(cor.angle), py = Math.cos(cor.angle);
+  var startX = cor.A.x - ax * cor.marginPx, startY = cor.A.y - ay * cor.marginPx;
+  var endX = cor.B.x + ax * cor.marginPx, endY = cor.B.y + ay * cor.marginPx;
+  var halfW = cor.widthPx / 2;
+  return [
+    { x: startX + px * halfW, y: startY + py * halfW },
+    { x: endX + px * halfW, y: endY + py * halfW },
+    { x: endX - px * halfW, y: endY - py * halfW },
+    { x: startX - px * halfW, y: startY - py * halfW }
+  ];
+}
+
+function renderMeasureOverlay(){
+  clearSvg();
+  var poly = document.createElementNS(svgNS, "polygon");
+  poly.setAttribute("points", corridorPolygonPoints(state.corridor).map(function(p){ return p.x + "," + p.y; }).join(" "));
+  poly.setAttribute("class", "corridor-poly");
+  el.overlaySvg.appendChild(poly);
+  [["A", state.corridor.A], ["B", state.corridor.B]].forEach(function(pair){
+    var c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("cx", pair[1].x); c.setAttribute("cy", pair[1].y);
+    c.setAttribute("r", state.videoW * 0.012);
+    c.setAttribute("class", "calib-pin pin-" + pair[0]);
+    el.overlaySvg.appendChild(c);
+  });
+}
+
+// ---------- 検出・追跡 ----------
+function resetDetectState(){
+  state.detect.bg = null;
+  state.detect.prevMeanLum = null;
+  state.detect.lastTrack = null;
+  state.detect.vx = 0; state.detect.vy = 0;
+  state.detect.missStreak = 0;
+  state.detect.consecValid = 0;
+  state.detect.sHistory = [];
+  state.detect.pendingCross = null;
+}
+
+function colorMaskValue(r, g, b, preset){
+  if (preset === "auto") return true;
+  var maxc = Math.max(r, g, b), minc = Math.min(r, g, b);
+  var sat = maxc === 0 ? 0 : (maxc - minc) / maxc;
+  if (preset === "white") return maxc > 120 && sat < 0.4;
+  if (preset === "yellow") return r > 110 && g > 110 && (r - b) > 20 && (g - b) > 20;
+  return true;
+}
+
+function findBlobs(mask, w, h){
+  var visited = new Uint8Array(w * h);
+  var blobs = [];
+  var stack = [];
+  for (var y = 0; y < h; y++){
+    for (var x = 0; x < w; x++){
+      var idx = y * w + x;
+      if (!mask[idx] || visited[idx]) continue;
+      var minX = x, maxX = x, minY = y, maxY = y, count = 0, sumX = 0, sumY = 0;
+      stack.push(idx); visited[idx] = 1;
+      while (stack.length){
+        var cur = stack.pop();
+        var cy = (cur / w) | 0, cx = cur - cy * w;
+        count++; sumX += cx; sumY += cy;
+        if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+        if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+        if (cx > 0){ var n1 = cur - 1; if (mask[n1] && !visited[n1]){ visited[n1] = 1; stack.push(n1); } }
+        if (cx < w - 1){ var n2 = cur + 1; if (mask[n2] && !visited[n2]){ visited[n2] = 1; stack.push(n2); } }
+        if (cy > 0){ var n3 = cur - w; if (mask[n3] && !visited[n3]){ visited[n3] = 1; stack.push(n3); } }
+        if (cy < h - 1){ var n4 = cur + w; if (mask[n4] && !visited[n4]){ visited[n4] = 1; stack.push(n4); } }
+      }
+      blobs.push({ cx: sumX / count, cy: sumY / count, minX: minX, maxX: maxX, minY: minY, maxY: maxY, area: count, w: maxX - minX + 1, h: maxY - minY + 1 });
+    }
+  }
+  return blobs;
+}
+
+function registerMiss(){
+  state.detect.missStreak++;
+  state.detect.consecValid = 0;
+  if (state.detect.missStreak > 6){
+    state.detect.lastTrack = null; state.detect.vx = 0; state.detect.vy = 0;
+  }
+  updateDetectDot(false);
+}
+
+function updateDetectDot(active){
+  el.detectDot.classList.toggle("active", active);
+}
+function flashDetectDot(){
+  el.detectDot.classList.add("flash");
+  setTimeout(function(){ el.detectDot.classList.remove("flash"); }, 350);
+}
+
+function chooseAndTrack(candidates, t, scale){
+  var detect = state.detect;
+  var chosen = null;
+  if (!candidates.length){ registerMiss(); return; }
+  if (detect.lastTrack){
+    var dt = t - detect.lastTrack.t;
+    var predX = detect.lastTrack.x + detect.vx * dt;
+    var predY = detect.lastTrack.y + detect.vy * dt;
+    var maxPxPerSec = (MAX_SPEED_KMH / 3.6) / state.corridor.metersPerPixel * scale * 1.6;
+    var gateRadius = Math.max(maxPxPerSec * Math.max(dt, 0.001), 6);
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < candidates.length; i++){
+      var d = Math.hypot(candidates[i].cx - predX, candidates[i].cy - predY);
+      if (d < gateRadius && d < bestD){ bestD = d; best = candidates[i]; }
+    }
+    chosen = best;
+    if (!chosen){ registerMiss(); return; }
+  } else {
+    chosen = candidates.reduce(function(a, b){ return b.score > a.score ? b : a; });
+  }
+
+  var prev = detect.lastTrack;
+  if (prev){
+    var pdt = t - prev.t;
+    if (pdt > 0){ detect.vx = (chosen.cx - prev.x) / pdt; detect.vy = (chosen.cy - prev.y) / pdt; }
+  }
+  detect.lastTrack = { x: chosen.cx, y: chosen.cy, t: t };
+  detect.missStreak = 0;
+  detect.consecValid++;
+  updateDetectDot(true);
+
+  var s = (chosen.cx / scale) - state.corridor.marginPx;
+  pushSHistory(s, t);
+}
+
+function pushSHistory(s, t){
+  var detect = state.detect;
+  detect.sHistory.push({ s: s, t: t });
+  if (detect.sHistory.length > 5) detect.sHistory.shift();
+  if (detect.sHistory.length < 2 || detect.consecValid < MIN_CONSEC_VALID) return;
+  var prev = detect.sHistory[detect.sHistory.length - 2];
+  var cur = detect.sHistory[detect.sHistory.length - 1];
+  checkGateCross(prev, cur, 0, "A");
+  checkGateCross(prev, cur, state.corridor.lengthPx, "B");
+}
+
+// 前後フレームの直線補間でゲート通過時刻をサブフレーム精度で求める
+function checkGateCross(prev, cur, gateS, gateName){
+  var d0 = prev.s - gateS, d1 = cur.s - gateS;
+  var crossed = (d0 <= 0 && d1 > 0) || (d0 >= 0 && d1 < 0);
+  if (!crossed) return;
+  var frac = (d0 === d1) ? 0 : d0 / (d0 - d1);
+  var crossT = prev.t + frac * (cur.t - prev.t);
+  var nominalDt = 1 / (state.actualFps || 30);
+  var gapFrames = (cur.t - prev.t) / nominalDt;
+  var confident = gapFrames <= 1.6;
+  handleGateEvent(gateName, crossT, confident);
+}
+
+function handleGateEvent(gate, t, confident){
+  var detect = state.detect;
+  var pending = detect.pendingCross;
+  if (!pending || pending.gate === gate){
+    detect.pendingCross = { gate: gate, t: t, confident: confident };
+    return;
+  }
+  var elapsed = Math.abs(t - pending.t);
+  if (elapsed > MAX_TRANSIT_S){
+    detect.pendingCross = { gate: gate, t: t, confident: confident };
+    return;
+  }
+  var speedMps = (state.corridor.lengthPx * state.corridor.metersPerPixel) / elapsed;
+  recordSpeed(speedMps, pending.confident && confident);
+  detect.pendingCross = null;
+}
+
+function recordSpeed(speedMps, highConfidence){
+  var kmh = speedMps * 3.6;
+  if (!isFinite(kmh) || kmh < MIN_SPEED_KMH || kmh > MAX_SPEED_KMH) return;
+  var mph = speedMps * 2.23694;
+  var reading = { time: new Date(), kmh: kmh, mph: mph, highConfidence: highConfidence };
+  state.session.readings.unshift(reading);
+  if (state.session.readings.length > 50) state.session.readings.pop();
+  renderReadout(reading);
+  renderHistory();
+  flashDetectDot();
+}
+
+function renderReadout(reading){
+  el.readoutKmh.textContent = reading.kmh.toFixed(1);
+  el.readoutMph.textContent = reading.mph.toFixed(1) + " mph";
+  el.readoutKmh.classList.toggle("low-confidence", !reading.highConfidence);
+  el.readoutKmh.classList.remove("pop");
+  void el.readoutKmh.offsetWidth;
+  el.readoutKmh.classList.add("pop");
+}
+
+function renderHistory(){
+  el.historyList.textContent = "";
+  state.session.readings.forEach(function(r){
+    var li = document.createElement("li");
+    li.className = "history-item" + (r.highConfidence ? "" : " low-confidence");
+    var t = document.createElement("span"); t.className = "hi-time";
+    t.textContent = r.time.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    var k = document.createElement("span"); k.className = "hi-speed"; k.textContent = r.kmh.toFixed(1) + " km/h";
+    var m = document.createElement("span"); m.className = "hi-mph"; m.textContent = r.mph.toFixed(1) + " mph";
+    li.appendChild(t); li.appendChild(k); li.appendChild(m);
+    el.historyList.appendChild(li);
+  });
+}
+
+function exportCsv(){
+  var rows = ["time,speed_kmh,speed_mph,confidence"];
+  state.session.readings.forEach(function(r){
+    rows.push([r.time.toISOString(), r.kmh.toFixed(1), r.mph.toFixed(1), r.highConfidence ? "high" : "low"].join(","));
+  });
+  var blob = new Blob([rows.join("\n")], { type: "text/csv" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  var d = new Date();
+  var stamp = d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + "_" + pad2(d.getHours()) + pad2(d.getMinutes());
+  a.href = url;
+  a.download = "球速ログ_" + stamp + ".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+function pad2(n){ return n < 10 ? "0" + n : "" + n; }
+
+// ---------- 1フレーム分の解析 ----------
+function processFrame(t){
+  var cor = state.corridor, detect = state.detect;
+  drawCorridorFrame();
+  var w = cor.canvasW, h = cor.canvasH, n = w * h;
+  var imgData = cor.ctx.getImageData(0, 0, w, h);
+  var data = imgData.data;
+
+  if (!detect._lumaBuf || detect._lumaBuf.length !== n){
+    detect._lumaBuf = new Float32Array(n);
+    detect._maskBuf = new Uint8Array(n);
+  }
+  var luma = detect._lumaBuf, mask = detect._maskBuf;
+  var sumLum = 0;
+  for (var i = 0, p = 0; i < n; i++, p += 4){
+    var l = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+    luma[i] = l; sumLum += l;
+  }
+  var meanLum = sumLum / n;
+
+  var shakeFlag = false;
+  if (detect.prevMeanLum !== null && Math.abs(meanLum - detect.prevMeanLum) > 18){
+    shakeFlag = true;
+  }
+  detect.prevMeanLum = meanLum;
+
+  if (!detect.bg){
+    detect.bg = new Float32Array(luma);
+  }
+  var bg = detect.bg;
+  var thresh = 8 + (1 - detect.sensitivity) * 42;
+  var preset = state.calib.ballColor;
+  for (i = 0, p = 0; i < n; i++, p += 4){
+    var diff = Math.abs(luma[i] - bg[i]);
+    var isFg = diff > thresh;
+    if (isFg && preset !== "auto"){
+      isFg = colorMaskValue(data[p], data[p + 1], data[p + 2], preset);
+    }
+    mask[i] = isFg ? 1 : 0;
+    bg[i] = bg[i] * (1 - BG_ALPHA) + luma[i] * BG_ALPHA;
+  }
+
+  if (shakeFlag){ registerMiss(); return; }
+
+  var blobs = findBlobs(mask, w, h);
+  var scale = cor.scale;
+  var expectedDiamPx = cor.expectedBallPx * scale;
+  var expectedAreaPx = Math.PI * (expectedDiamPx / 2) * (expectedDiamPx / 2);
+  var candidates = [];
+  for (var bi = 0; bi < blobs.length; bi++){
+    var b = blobs[bi];
+    if (b.h < expectedDiamPx * 0.35 || b.h > expectedDiamPx * 2.6) continue;
+    if (b.w < expectedDiamPx * 0.3 || b.w > expectedDiamPx * 4.5) continue;
+    var bboxArea = b.w * b.h;
+    var fill = b.area / bboxArea;
+    if (fill < 0.32) continue;
+    var sizeScore = 1 / (1 + Math.abs(b.area - expectedAreaPx) / expectedAreaPx);
+    b.score = sizeScore * fill;
+    candidates.push(b);
+  }
+  chooseAndTrack(candidates, t, scale);
+}
+
+// ---------- メインループ ----------
+function onVideoFrame(now, metadata){
+  if (!state.running) return;
+  processFrame(metadata.mediaTime);
+  el.video.requestVideoFrameCallback(onVideoFrame);
+}
+function onRaf(){
+  if (!state.running) return;
+  processFrame(el.video.currentTime);
+  requestAnimationFrame(onRaf);
+}
+function startMeasureLoop(){
+  state.running = true;
+  if ("requestVideoFrameCallback" in HTMLVideoElement.prototype){
+    state.usingRVFC = true;
+    el.video.requestVideoFrameCallback(onVideoFrame);
+  } else {
+    state.usingRVFC = false;
+    requestAnimationFrame(onRaf);
+  }
+}
+function stopMeasureLoop(){
+  state.running = false;
+}
+
+// ---------- ボタン類 ----------
+el.btnStartCamera.addEventListener("click", startCamera);
+
+el.btnStartMeasure.addEventListener("click", function(){
+  state.corridor = computeCorridor();
+  setupCorridorCanvas();
+  resetDetectState();
+  state.session.readings = [];
+  el.readoutKmh.textContent = "--";
+  el.readoutMph.textContent = "";
+  renderHistory();
+  showPanel("measure");
+  renderMeasureOverlay();
+  startMeasureLoop();
+});
+
+el.sensitivityInput.addEventListener("input", function(){
+  state.detect.sensitivity = parseFloat(el.sensitivityInput.value);
+});
+
+el.btnExportCsv.addEventListener("click", exportCsv);
+
+el.btnRecalibrate.addEventListener("click", function(){
+  stopMeasureLoop();
+  showPanel("calib");
+  renderCalibOverlay();
+});
+
+el.btnStopCamera.addEventListener("click", function(){
+  stopMeasureLoop();
+  if (state.fpsIntervalId){ clearInterval(state.fpsIntervalId); state.fpsIntervalId = null; }
+  if (state.stream){ state.stream.getTracks().forEach(function(tr){ tr.stop(); }); state.stream = null; }
+  el.fpsBadge.hidden = true;
+  showPanel("start");
+});
+
+})();
+</script>
+</body>
+</html>
