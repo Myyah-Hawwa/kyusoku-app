@@ -372,7 +372,7 @@ function showCameraError(err){
 function fitStage(){
   if (!state.videoW || !state.videoH) return;
   var availW = el.stageWrap.clientWidth;
-  var availH = Math.min(window.innerHeight * 0.5, 520);
+  var availH = Math.min(window.innerHeight * 0.75, 900);
   var aspect = state.videoW / state.videoH;
   var w = availW, h = w / aspect;
   if (h > availH){ h = availH; w = h * aspect; }
@@ -502,10 +502,18 @@ function computeCorridor(){
   var angle = Math.atan2(dy, dx);
   var metersPerPixel = state.calib.distanceM / lengthPx;
   var expectedBallPx = state.calib.ballDiameterM / metersPerPixel;
+  // 実際の投球は重力落下や撮影角度のズレで基準線から外れるため、ボール径だけでなく距離に応じた余裕を持たせる
+  var widthPx = Math.max(expectedBallPx * 3, lengthPx * 0.05, 24);
   var marginPx = expectedBallPx * 2.5;
-  var widthPx = Math.max(expectedBallPx * 2.4, 18);
   var rawLen = lengthPx + marginPx * 2;
-  var scale = Math.min(1, 260 / rawLen);
+  // 解析キャンバス上でボールが数ピクセル以上になるよう拡大する(小さすぎると縮小時にボールが背景へ溶けて検出できない)。
+  // ただし総ピクセル数は処理負荷の上限で頭打ちにする。
+  var targetBallPx = 16;
+  var maxCanvasPixels = 250000;
+  var scale = Math.min(6, targetBallPx / expectedBallPx);
+  if (rawLen * widthPx * scale * scale > maxCanvasPixels){
+    scale = Math.sqrt(maxCanvasPixels / (rawLen * widthPx));
+  }
   var canvasW = Math.max(32, Math.round(rawLen * scale));
   var canvasH = Math.max(16, Math.round(widthPx * scale));
   var cosA = Math.cos(angle), sinA = Math.sin(angle);
