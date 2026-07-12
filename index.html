@@ -1517,15 +1517,19 @@ function detectForeground(ctx, w, h){
   return { mask: mask, shakeFlag: shakeFlag };
 }
 
-function filterCandidatesBySize(blobs, fallbackDiamPx){
+function filterCandidatesBySize(blobs, fallbackDiamPx, wideOnly){
   var detect = state.detect;
   var haveSizeEma = detect.sizeEma !== null && detect.sizeEmaN >= SIZE_EMA_MIN_SAMPLES;
   var refDiamPx = haveSizeEma ? detect.sizeEma : fallbackDiamPx;
   var expectedAreaPx = Math.PI * (refDiamPx / 2) * (refDiamPx / 2);
+  // 正面/背面モードでは見かけの直径が1/距離に比例して増える(近づくほど加速度的に大きくなる)ため、
+  // EMAで絞り込んだ帯(0.55〜1.8倍)は実際の成長率に追いつけず、近距離ゲート付近でほぼ確実に
+  // 検出を取りこぼす(数値シミュレーションで確認済み)。このモードでは常に広い帯を使う。
+  var useTightBand = haveSizeEma && !wideOnly;
   var candidates = [];
   for (var bi = 0; bi < blobs.length; bi++){
     var b = blobs[bi];
-    if (haveSizeEma){
+    if (useTightBand){
       if (b.h < refDiamPx * 0.55 || b.h > refDiamPx * 1.8) continue;
     } else {
       if (b.h < refDiamPx * 0.3 || b.h > refDiamPx * 3.4) continue;
@@ -1565,7 +1569,7 @@ function processFrameAxial(t){
   var inWindow = blobs.filter(function(b){
     return Math.abs(b.cx - sw.cx) < sw.size / 2 && Math.abs(b.cy - sw.cy) < sw.size / 2;
   });
-  var candidates = filterCandidatesBySize(inWindow, ax.fallbackDiamPx);
+  var candidates = filterCandidatesBySize(inWindow, ax.fallbackDiamPx, true);
   chooseAndTrack(candidates, t, ax.scale);
 }
 
