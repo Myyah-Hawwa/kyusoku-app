@@ -70,8 +70,13 @@ h1{font-size:1.05rem;margin:0;font-weight:800;letter-spacing:.02em;}
 
 #stageWrap{width:100%;}
 #stage{position:relative;background:#000;border-radius:var(--radius);overflow:hidden;margin:0 auto 14px;box-shadow:var(--shadow);}
-#stage video{width:100%;height:100%;object-fit:fill;display:block;}
+#stageInner{position:absolute;top:50%;left:50%;}
+#stageInner video{width:100%;height:100%;object-fit:fill;display:block;}
 .overlay-svg{position:absolute;inset:0;width:100%;height:100%;}
+.stage-btn{position:absolute;z-index:2;background:rgba(0,0,0,.5);color:#fff;border:1.4px solid rgba(255,255,255,.55);border-radius:99px;padding:6px 13px;font-size:.72rem;font-weight:700;}
+.stage-btn-rotate{top:10px;left:10px;}
+.stage-zoom{position:absolute;left:10px;right:10px;bottom:10px;z-index:2;background:rgba(0,0,0,.4);border-radius:99px;padding:4px 12px;display:flex;align-items:center;}
+.stage-zoom input[type="range"]{margin:0;}
 .calib-pin{fill:var(--accent-soft);stroke:var(--accent);stroke-width:3;}
 .calib-pin.pin-A{stroke:#3C82C6;fill:rgba(60,130,198,.18);}
 .calib-pin.pin-B{stroke:var(--accent);fill:var(--accent-soft);}
@@ -191,9 +196,15 @@ input[type="range"]{width:100%;}
 
   <div id="stageWrap">
     <div id="stage" hidden>
-      <video id="video" playsinline muted></video>
-      <svg id="overlaySvg" class="overlay-svg"></svg>
+      <div id="stageInner">
+        <video id="video" playsinline muted></video>
+        <svg id="overlaySvg" class="overlay-svg"></svg>
+      </div>
       <div id="detectDot" class="detect-dot"></div>
+      <button type="button" id="btnFlipRotation" class="stage-btn stage-btn-rotate" hidden>回転を反転</button>
+      <div class="stage-zoom">
+        <input type="range" id="zoomInput" min="1" max="4" step="0.1" value="1">
+      </div>
     </div>
   </div>
 
@@ -320,6 +331,9 @@ var el = {
   panelMeasure: document.getElementById("panelMeasure"),
   stage: document.getElementById("stage"),
   stageWrap: document.getElementById("stageWrap"),
+  stageInner: document.getElementById("stageInner"),
+  btnFlipRotation: document.getElementById("btnFlipRotation"),
+  zoomInput: document.getElementById("zoomInput"),
   video: document.getElementById("video"),
   overlaySvg: document.getElementById("overlaySvg"),
   detectDot: document.getElementById("detectDot"),
@@ -386,6 +400,8 @@ var state = {
   running: false,
   usingRVFC: false,
   measureGen: 0,
+  displayRotation: 0,
+  zoom: 1,
   session: { readings: [], shootMode: "lateral", source: "live" },
   videoFileUrl: null,
   calib: {
@@ -447,8 +463,8 @@ function startCamera(){
   navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: { ideal: "environment" },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
       frameRate: { ideal: 60, min: 24 }
     },
     audio: false
@@ -477,16 +493,29 @@ function onCameraReady(){
 }
 
 function onVideoMetadata(){
-  // 新しい映像ソース(新規カメラ起動・新しい動画ファイル)なので、前回の基準点は無意味になる
+  // 新しい映像ソース(新規カメラ起動・新しい動画ファイル、または端末回転による寸法変化)なので、前回の基準点は無意味になる
   state.calib.A = null; state.calib.B = null;
   state.videoW = el.video.videoWidth;
   state.videoH = el.video.videoHeight;
   el.overlaySvg.setAttribute("viewBox", "0 0 " + state.videoW + " " + state.videoH);
+  // 縦長で届いた映像は常に横向きで表示する(iOS SafariにScreen Orientation Lockは無いため表示側で回転を模擬する)
+  if (state.videoW < state.videoH){
+    state.displayRotation = 90;
+    el.btnFlipRotation.hidden = false;
+  } else {
+    state.displayRotation = 0;
+    el.btnFlipRotation.hidden = true;
+  }
   fitStage();
   renderCalibOverlay();
   updateSeekUI();
   updateStartMeasureEnabled();
 }
+// 撮影中に端末を回転するとvideoWidth/videoHeightが変わりうるため追従する(ライブカメラのみ発火する想定)
+el.video.addEventListener("resize", function(){
+  if (document.body.dataset.mode === "start" || !el.video.videoWidth) return;
+  onVideoMetadata();
+});
 
 // ---------- 録画した動画ファイルからの計測 ----------
 function startFileSource(file){
@@ -654,20 +683,46 @@ function showCameraError(err){
   el.startError.hidden = false;
 }
 
+// 縦長で届いた映像は#stageInnerをCSSで90度回転させて常に横向きで表示する。
+// タップ座標変換(getScreenCTM)は祖先要素のCSS変形を含めて計算されるため、
+// 回転・拡大を#stageInnerに適用するだけでキャリブレーション/解析側は無変更のまま正しく動く。
 function fitStage(){
   if (!state.videoW || !state.videoH) return;
   var availW = el.stageWrap.clientWidth;
   var availH = Math.min(window.innerHeight * 0.75, 900);
-  var aspect = state.videoW / state.videoH;
+  var rotated = state.displayRotation === 90 || state.displayRotation === 270;
+  var dispW = rotated ? state.videoH : state.videoW;
+  var dispH = rotated ? state.videoW : state.videoH;
+  var aspect = dispW / dispH;
   var w = availW, h = w / aspect;
   if (h > availH){ h = availH; w = h * aspect; }
   el.stage.style.width = w + "px";
   el.stage.style.height = h + "px";
+  applyStageInnerTransform(w, h, rotated);
+}
+
+function applyStageInnerTransform(stageW, stageH, rotated){
+  var innerW = rotated ? stageH : stageW;
+  var innerH = rotated ? stageW : stageH;
+  el.stageInner.style.width = innerW + "px";
+  el.stageInner.style.height = innerH + "px";
+  el.stageInner.style.marginLeft = (-innerW / 2) + "px";
+  el.stageInner.style.marginTop = (-innerH / 2) + "px";
+  el.stageInner.style.transform = "rotate(" + state.displayRotation + "deg) scale(" + state.zoom + ")";
 }
 window.addEventListener("resize", fitStage);
 if (screen.orientation && screen.orientation.addEventListener){
   screen.orientation.addEventListener("change", fitStage);
 }
+
+el.btnFlipRotation.addEventListener("click", function(){
+  state.displayRotation = state.displayRotation === 90 ? 270 : 90;
+  fitStage();
+});
+el.zoomInput.addEventListener("input", function(){
+  state.zoom = parseFloat(el.zoomInput.value) || 1;
+  fitStage();
+});
 
 // ---------- 撮影アングル(モード)切替 ----------
 var shootModeButtons = Array.prototype.slice.call(el.shootModeSeg.querySelectorAll(".seg-btn"));
@@ -1623,6 +1678,10 @@ function backToStart(){
   state.session.source = "live";
   state.calib.A = null; state.calib.B = null;
   state.dragging = null;
+  state.displayRotation = 0;
+  state.zoom = 1;
+  el.zoomInput.value = 1;
+  el.btnFlipRotation.hidden = true;
   el.fileControls.hidden = true;
   el.fpsBadge.hidden = true;
   el.fpsBadge.textContent = "";
