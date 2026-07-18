@@ -26,6 +26,9 @@
   --shadow:0 1px 0 rgba(27,42,74,.05), 0 8px 20px rgba(27,42,74,.09);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+/* hidden属性は必ず非表示にする。.field-row/.stage-zoom等の作者側 display:flex はUAの[hidden]{display:none}に
+   カスケードで勝ってしまい、hidden属性を立てても隠れない(=計測中にズームスライダーが残り操作できてしまう等)ため強制する。 */
+[hidden]{display:none !important;}
 html,body{margin:0;padding:0;height:100%;}
 body{
   font-family:"Yu Gothic","游ゴシック",YuGothic,"Hiragino Kaku Gothic ProN","Hiragino Sans",Meiryo,system-ui,sans-serif;
@@ -83,6 +86,7 @@ h1{font-size:1.05rem;margin:0;font-weight:800;letter-spacing:.02em;}
 .calib-label{font-size:26px;font-weight:800;fill:#fff;paint-order:stroke;stroke:rgba(0,0,0,.55);stroke-width:6px;text-anchor:middle;}
 .calib-line{stroke:rgba(255,255,255,.8);stroke-width:2;stroke-dasharray:10 8;}
 .corridor-poly{fill:rgba(197,48,58,.14);stroke:rgba(197,48,58,.6);stroke-width:2;}
+.release-marker{fill:rgba(47,133,87,.25);stroke:var(--ok);stroke-width:3;stroke-dasharray:6 5;}
 
 .detect-dot{position:absolute;top:10px;right:10px;width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.35);border:2px solid rgba(255,255,255,.6);transition:background .15s;}
 .detect-dot.active{background:var(--ink);border-color:#fff;}
@@ -104,6 +108,8 @@ h1{font-size:1.05rem;margin:0;font-weight:800;letter-spacing:.02em;}
 .custom-ball label{display:flex;flex-direction:column;gap:4px;font-size:.76rem;}
 
 input[type="range"]{width:100%;}
+.motion-toggle{display:flex;align-items:center;gap:8px;font-size:.82rem;font-weight:700;color:var(--ink-soft);width:100%;cursor:pointer;}
+.motion-toggle input[type="checkbox"]{width:18px;height:18px;flex:0 0 auto;accent-color:var(--ok);}
 
 .axial-caveat{font-size:.82rem;color:var(--ink-soft);font-weight:600;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;}
 .calib-hint{font-size:.8rem;font-weight:700;border-radius:10px;padding:9px 12px;margin:2px 0 12px;}
@@ -169,7 +175,7 @@ input[type="range"]{width:100%;}
   </div>
 
   <section id="panelStart" class="panel">
-    <p class="lead">iPhoneのカメラでボールの通過速度を計測します。三脚などで固定し、投球経路が見渡せる位置(<b>真横〜斜め、正面/背面</b>)に設置してください。</p>
+    <p class="lead">スマホ(iPhone / Android)のカメラでボールの通過速度を計測します。三脚などで固定し、投球経路が見渡せる位置(<b>真横〜斜め、正面/背面</b>)に設置してください。</p>
     <div class="field-row">
       <span class="field-label">撮影アングル</span>
       <div class="segmented" id="shootModeSeg">
@@ -182,7 +188,7 @@ input[type="range"]{width:100%;}
       <li>「正面/背面」: バックネット越し・投手の後ろなど、ボールがカメラに近づく/遠ざかる形の撮影に対応します(見かけの大きさの変化から速度を計算するため、側面より精度は落ちます)</li>
       <li>ネット越しなど視界を遮る場所からの撮影は精度が下がるためおすすめしません</li>
       <li>キャリブレーションの基準点は、実際の基準位置(距離が分かっている2点)に正確にタップ・調整してください</li>
-      <li>iPhoneのスロー撮影(120/240fps)で録画した動画を使うと、ライブカメラより高精度に計測できます</li>
+      <li>スロー撮影の動画(iPhoneの120/240fps録画など)を使うと、ライブカメラより高精度に計測できます。ただしAndroidの一部機種のように「スロー再生の状態」で保存される動画は、実際の時間が分からないため正しく計測できません</li>
       <li>カメラ映像・動画ファイルは端末の外へ送信されません</li>
       <li>ライブカメラの利用にはHTTPS配信のページが必要です(file://では起動できません。録画した動画の読み込みはこの制約を受けません)</li>
     </ul>
@@ -202,7 +208,7 @@ input[type="range"]{width:100%;}
       </div>
       <div id="detectDot" class="detect-dot"></div>
       <button type="button" id="btnFlipRotation" class="stage-btn stage-btn-rotate" hidden>回転を反転</button>
-      <div class="stage-zoom">
+      <div class="stage-zoom" id="stageZoom">
         <input type="range" id="zoomInput" min="1" max="4" step="0.1" value="1">
       </div>
     </div>
@@ -291,6 +297,12 @@ input[type="range"]{width:100%;}
       <label for="sensitivityInput">感度</label>
       <input type="range" id="sensitivityInput" min="0" max="1" step="0.01" value="0.5">
     </div>
+    <div class="field-row">
+      <label class="motion-toggle" for="motionAssistInput">
+        <input type="checkbox" id="motionAssistInput" checked>
+        投球モーション連動(白球の出所を予測して検出を補助)
+      </label>
+    </div>
     <div class="history-wrap">
       <div class="history-head">
         <span>計測履歴(このセッションのみ)</span>
@@ -322,6 +334,11 @@ var AXIAL_DIAM_FLOOR_PX = 4;   // 回帰に使うサンプルの絶対下限(こ
 var AXIAL_REJECT_PX = 8;       // 遠端の見かけ直径がこれ未満なら数値を出さず「計測できません」
 var AXIAL_CONF_YELLOW_PX = 15; // 黄(ふつう)の下限
 var AXIAL_CONF_GREEN_PX = 25;  // 緑(高い)の下限
+// 投球モーション連動(白球の出所予測)のパラメータ
+var MOTION_EMA_A = 0.4;        // 動体エネルギーの平滑化
+var MOTION_BASE_A = 0.03;      // 静止時ベースラインの追従(遅め=投球で汚染されにくい)
+var MOTION_BURST_K = 2.2;      // ベースラインの何倍で「投球中」とみなすか
+var MOTION_MIN_FRAC = 0.008;   // 画面に対する最低動体割合(これ未満は投球とみなさない)
 var svgNS = "http://www.w3.org/2000/svg";
 
 var el = {
@@ -333,6 +350,7 @@ var el = {
   stageWrap: document.getElementById("stageWrap"),
   stageInner: document.getElementById("stageInner"),
   btnFlipRotation: document.getElementById("btnFlipRotation"),
+  stageZoom: document.getElementById("stageZoom"),
   zoomInput: document.getElementById("zoomInput"),
   video: document.getElementById("video"),
   overlaySvg: document.getElementById("overlaySvg"),
@@ -370,6 +388,7 @@ var el = {
   btnResetPoints: document.getElementById("btnResetPoints"),
   btnStartMeasure: document.getElementById("btnStartMeasure"),
   sensitivityInput: document.getElementById("sensitivityInput"),
+  motionAssistInput: document.getElementById("motionAssistInput"),
   historyList: document.getElementById("historyList"),
   btnExportCsv: document.getElementById("btnExportCsv"),
   btnRecalibrate: document.getElementById("btnRecalibrate"),
@@ -381,6 +400,7 @@ var el = {
 };
 
 var axialWindowRectEl = null;
+var releaseMarkerEl = null;
 
 var BALL_PRESETS = {
   baseball: { diam: 0.073, color: "white" },
@@ -402,6 +422,7 @@ var state = {
   measureGen: 0,
   displayRotation: 0,
   zoom: 1,
+  hwZoom: null,
   session: { readings: [], shootMode: "lateral", source: "live" },
   videoFileUrl: null,
   calib: {
@@ -435,10 +456,20 @@ var state = {
     sizeEma: null,
     sizeEmaN: 0,
     track: [],
-    searchWindow: null
+    searchWindow: null,
+    motionAssist: true,
+    motion: null
   },
   dragging: null
 };
+
+function newMotionModel(){
+  return {
+    ema: null, base: null, active: false, everActive: false,
+    cx: null, cy: null, velX: 0, velY: 0,
+    releaseX: null, releaseY: null, releaseT: 0, dirX: 0, dirY: 0
+  };
+}
 
 // ---------- 画面遷移 ----------
 function showPanel(name){
@@ -447,6 +478,9 @@ function showPanel(name){
   el.panelCalib.hidden = name !== "calib";
   el.panelMeasure.hidden = name !== "measure";
   el.stage.hidden = name === "start";
+  // ハードウェアズームは実際の画角を変えてしまい、計測中に動かすとキャリブレーションが崩れるため計測画面では隠す
+  // (CSSズームは表示だけの拡大なので計測中も操作してよい)
+  el.stageZoom.hidden = name === "measure" && !!state.hwZoom;
 }
 
 // ---------- カメラ起動 ----------
@@ -460,7 +494,22 @@ function startCamera(){
     showCameraError({ message: "UNSUPPORTED" });
     return;
   }
-  navigator.mediaDevices.getUserMedia({
+  requestCameraStream().then(function(stream){
+    state.stream = stream;
+    setupZoomControl();
+    el.video.srcObject = stream;
+    return el.video.play();
+  }).then(function(){
+    onCameraReady();
+  }).catch(function(err){
+    showCameraError(err);
+  });
+}
+
+// frameRateのmin指定などの必須条件を満たせないカメラ(特にAndroidの一部端末)では
+// OverconstrainedErrorで起動自体が失敗するため、許可拒否・カメラ無し以外の失敗は最小構成で再試行する
+function requestCameraStream(){
+  return navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: { ideal: "environment" },
       width: { ideal: 1920 },
@@ -468,14 +517,12 @@ function startCamera(){
       frameRate: { ideal: 60, min: 24 }
     },
     audio: false
-  }).then(function(stream){
-    state.stream = stream;
-    el.video.srcObject = stream;
-    return el.video.play();
-  }).then(function(){
-    onCameraReady();
   }).catch(function(err){
-    showCameraError(err);
+    if (err && (err.name === "NotAllowedError" || err.name === "NotFoundError")) throw err;
+    return navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } },
+      audio: false
+    });
   });
 }
 
@@ -669,11 +716,13 @@ function showCameraError(err){
   if (err.message === "INSECURE_CONTEXT"){
     msg = "このページはHTTPS(またはlocalhost)で開かれていません。GitHub Pages等でホスティングしたURLから開いてください。";
   } else if (err.message === "UNSUPPORTED"){
-    msg = "お使いのブラウザはカメラ機能に対応していません。最新のSafari(iOS)でお試しください。";
+    msg = "お使いのブラウザはカメラ機能に対応していません。最新のSafari(iPhone)またはChrome(Android)でお試しください。";
   } else if (err.message === "VIDEO_LOAD_ERROR"){
     msg = "動画の読み込みに失敗しました。対応していない形式か、ファイルが壊れている可能性があります。別の動画を選び直してください。";
   } else if (err.name === "NotAllowedError"){
-    msg = "カメラの使用が許可されていません。設定アプリ > Safari > カメラ でこのサイトへのアクセスを許可してください。";
+    msg = /Android/i.test(navigator.userAgent)
+      ? "カメラの使用が許可されていません。アドレスバーの鍵(サイト情報)アイコン > 権限 > カメラ、またはChromeの設定 > サイトの設定 > カメラ から、このサイトを許可してください。"
+      : "カメラの使用が許可されていません。設定アプリ > Safari > カメラ でこのサイトへのアクセスを許可してください。";
   } else if (err.name === "NotFoundError"){
     msg = "カメラが見つかりませんでした。";
   } else {
@@ -720,9 +769,67 @@ el.btnFlipRotation.addEventListener("click", function(){
   fitStage();
 });
 el.zoomInput.addEventListener("input", function(){
-  state.zoom = parseFloat(el.zoomInput.value) || 1;
-  fitStage();
+  var v = parseFloat(el.zoomInput.value);
+  if (state.hwZoom){
+    applyHwZoom(isFinite(v) ? v : state.hwZoom.min);
+  } else {
+    state.zoom = (isFinite(v) && v > 0) ? v : 1;
+    fitStage();
+  }
 });
+
+// Android Chrome等ではカメラ本体のズームを操作できる(iOS Safariには無い機能)。
+// 撮影される映像そのものが拡大されるため、CSS拡大と違って小さく写るボールの検出精度も上がる。
+function setupZoomControl(){
+  state.hwZoom = null;
+  var track = state.stream && state.stream.getVideoTracks()[0];
+  if (track && typeof track.getCapabilities === "function"){
+    var caps = null;
+    try { caps = track.getCapabilities(); } catch (err) { caps = null; }
+    var z = caps && caps.zoom;
+    if (z && isFinite(z.min) && isFinite(z.max) && z.max > z.min){
+      state.hwZoom = { track: track, min: z.min, applying: false, pendingValue: null };
+      el.zoomInput.min = z.min;
+      el.zoomInput.max = z.max;
+      el.zoomInput.step = (isFinite(z.step) && z.step > 0) ? z.step : 0.1;
+      var settings = (typeof track.getSettings === "function") ? track.getSettings() : null;
+      el.zoomInput.value = (settings && isFinite(settings.zoom)) ? settings.zoom : z.min;
+    }
+  }
+  if (!state.hwZoom) resetZoomSlider();
+  state.zoom = 1;
+}
+
+function resetZoomSlider(){
+  el.zoomInput.min = 1;
+  el.zoomInput.max = 4;
+  el.zoomInput.step = 0.1;
+  el.zoomInput.value = 1;
+}
+
+// applyConstraintsは非同期なので、スライダーを速く動かしても常に最後の値だけが反映されるよう直列化する
+function applyHwZoom(value){
+  var hz = state.hwZoom;
+  if (!hz) return;
+  hz.pendingValue = value;
+  if (!hz.applying){
+    hz.applying = true;
+    (function next(){
+      var v = hz.pendingValue;
+      hz.pendingValue = null;
+      hz.track.applyConstraints({ advanced: [{ zoom: v }] }).catch(function(){}).then(function(){
+        if (state.hwZoom !== hz) return;
+        if (hz.pendingValue !== null){ next(); } else { hz.applying = false; }
+      });
+    })();
+  }
+  // 実際の画角が変わる=基準点の画面位置もズレるため、設定済みの基準点は打ち直してもらう
+  if (state.calib.A || state.calib.B){
+    state.calib.A = null; state.calib.B = null;
+    renderCalibOverlay();
+    updateStartMeasureEnabled();
+  }
+}
 
 // ---------- 撮影アングル(モード)切替 ----------
 var shootModeButtons = Array.prototype.slice.call(el.shootModeSeg.querySelectorAll(".seg-btn"));
@@ -1154,7 +1261,14 @@ function renderMeasureOverlay(){
     rect.setAttribute("rx", 12);
     axialWindowRectEl = rect;
     el.overlaySvg.appendChild(rect);
+    var marker = document.createElementNS(svgNS, "circle");
+    marker.setAttribute("class", "release-marker");
+    marker.setAttribute("r", state.videoW * 0.02);
+    marker.setAttribute("visibility", "hidden");
+    releaseMarkerEl = marker;
+    el.overlaySvg.appendChild(marker);
     updateAxialWindowOverlay();
+    updateReleaseMarker();
   } else {
     var poly = document.createElementNS(svgNS, "polygon");
     poly.setAttribute("points", corridorPolygonPoints(state.corridor).map(function(p){ return p.x + "," + p.y; }).join(" "));
@@ -1180,6 +1294,19 @@ function updateAxialWindowOverlay(){
   axialWindowRectEl.setAttribute("height", vsize);
 }
 
+// 予測されたリリース点(白球の出所)を計測画面に表示する
+function updateReleaseMarker(){
+  if (!releaseMarkerEl || !state.axial) return;
+  var m = state.detect.motion;
+  if (!state.detect.motionAssist || !m || m.releaseX === null || !m.everActive){
+    releaseMarkerEl.setAttribute("visibility", "hidden");
+    return;
+  }
+  releaseMarkerEl.setAttribute("cx", m.releaseX / state.axial.scale);
+  releaseMarkerEl.setAttribute("cy", m.releaseY / state.axial.scale);
+  releaseMarkerEl.setAttribute("visibility", "visible");
+}
+
 // ---------- 検出・追跡(共通) ----------
 function resetDetectState(){
   state.detect.bg = null;
@@ -1194,6 +1321,50 @@ function resetDetectState(){
   state.detect.sizeEmaN = 0;
   state.detect.track = [];
   state.detect.searchWindow = null;
+  state.detect.motion = newMotionModel();
+}
+
+// 投球モーションモデルの更新。detectForeground内で毎フレーム呼ぶ(候補選択より前)。
+// count=生の動体画素数(色フィルタ前), cx/cy=その重心(解析キャンバス座標)。
+function updateMotionModel(count, cx, cy, totalPx, t){
+  var m = state.detect.motion;
+  if (!m) return;
+  if (m.ema === null){ m.ema = count; m.base = count; }
+  m.ema += MOTION_EMA_A * (count - m.ema);
+  var wasActive = m.active;
+  var activeNow = m.base > 0 && m.ema > m.base * MOTION_BURST_K && count > totalPx * MOTION_MIN_FRAC;
+  // ベースラインは静止時のみ追従させ、投球中の大きな動きで汚染されないようにする
+  if (!activeNow) m.base += MOTION_BASE_A * (count - m.base);
+  m.active = activeNow;
+  if (count > 0){
+    if (m.cx !== null){
+      m.velX = 0.5 * m.velX + 0.5 * (cx - m.cx);
+      m.velY = 0.5 * m.velY + 0.5 * (cy - m.cy);
+    }
+    m.cx = cx; m.cy = cy;
+  }
+  // 投球中はリリース起点(=動きの重心)と振り方向を更新し続ける。まだボールをロックしていない間だけ、
+  // 奥行きモードでは探索窓を「起点〜基準物中点」を包含する広さに拡張する(縮小はしない=取りこぼしを増やさない)。
+  if (activeNow && count > 0){
+    if (!wasActive) m.everActive = true;
+    m.releaseX = cx; m.releaseY = cy; m.releaseT = t;
+    m.dirX = m.velX; m.dirY = m.velY;
+    if (state.detect.motionAssist && state.session.shootMode === "axial" && state.axial && !state.detect.lastTrack){
+      seedAxialWindowFromRelease();
+    }
+  }
+}
+
+// 探索窓を、リリース起点と基準物中点の両方を含む大きさへ広げる(union: 既存カバー範囲は必ず維持)
+function seedAxialWindowFromRelease(){
+  var ax = state.axial, m = state.detect.motion, sw = state.detect.searchWindow;
+  if (!ax || !sw || m.releaseX === null) return;
+  var cx = (m.releaseX + ax.initCx) / 2, cy = (m.releaseY + ax.initCy) / 2;
+  var span = Math.hypot(m.releaseX - ax.initCx, m.releaseY - ax.initCy);
+  var size = Math.max(sw.size, span + Math.max(ax.fallbackDiamPx * 8, 120));
+  sw.cx = cx; sw.cy = cy; sw.size = size;
+  updateAxialWindowOverlay();
+  updateReleaseMarker();
 }
 
 function colorMaskValue(r, g, b, preset){
@@ -1260,6 +1431,26 @@ function flashDetectDot(){
   setTimeout(function(){ el.detectDot.classList.remove("flash"); }, 350);
 }
 
+// 初回ロック用スコア: 基本スコアに、投球起点への近さ・振り方向との一致で乗算ボーナスを掛ける。
+// motionAssist無効/投球未検出なら基本スコアをそのまま返す(= 従来挙動)。
+function motionAcquisitionScore(c){
+  var base = c.score;
+  var detect = state.detect;
+  var m = detect.motion;
+  // 奥行きモード専用(側面モードでは投手が写らずモーション重心が無意味なため加点しない=従来挙動)
+  if (state.session.shootMode !== "axial") return base;
+  if (!detect.motionAssist || !m || !m.everActive || m.releaseX === null) return base;
+  var ballPx = (state.axial && state.axial.fallbackDiamPx) || 8;
+  var ref = Math.max(ballPx, 6) * 8; // 起点からこの距離スケールで近さを正規化
+  var dx = c.cx - m.releaseX, dy = c.cy - m.releaseY;
+  var cmag = Math.hypot(dx, dy);
+  var prox = 1 / (1 + cmag / ref);   // 0..1(近いほど1)
+  var align = 0;
+  var dmag = Math.hypot(m.dirX, m.dirY);
+  if (dmag > 0.5 && cmag > 0.5){ align = Math.max(0, (dx * m.dirX + dy * m.dirY) / (dmag * cmag)); }
+  return base * (1 + 0.8 * prox + 0.5 * align * prox);
+}
+
 function chooseAndTrack(candidates, t, scale){
   var detect = state.detect;
   var mode = state.session.shootMode;
@@ -1285,7 +1476,12 @@ function chooseAndTrack(candidates, t, scale){
     chosen = best;
     if (!chosen){ registerMiss(); return; }
   } else {
-    chosen = candidates.reduce(function(a, b){ return b.score > a.score ? b : a; });
+    // 初回ロック: 投球モーションが検出できていれば、リリース起点に近く振り方向に沿う候補を優先する。
+    // 加点は乗算のため選ばれる候補は変わりうるが、候補を除外しない(再現性は落ちない)。モーション未検出時は
+    // 基本スコア最大の候補=従来と同じ選択になる。万一の誤ロックもゲート判定/registerMissで数フレーム内に復帰する。
+    chosen = candidates.reduce(function(a, b){
+      return motionAcquisitionScore(b) > motionAcquisitionScore(a) ? b : a;
+    });
   }
 
   var prev = detect.lastTrack;
@@ -1309,6 +1505,7 @@ function chooseAndTrack(candidates, t, scale){
     detect.track.push({ t: t, diam: chosen.h });
     if (detect.track.length > 300) detect.track.shift();
     updateAxialWindowOverlay();
+    updateReleaseMarker();
   } else {
     var s = (chosen.cx / scale) - state.corridor.marginPx;
     pushSHistory(s, t);
@@ -1380,14 +1577,20 @@ function finalizeAxialReading(){
   var b = (swy - a * swx) / sw;
   if (a === 0) return;
 
+  // 見かけ直径(ネイティブ動画px): 信頼度・棄却しきい値の判定に使う(校正プレビューと同じ単位)
   var diamNear_px = ax.K_px_m / ax.nearGate_m;
   var diamFar_px = ax.K_px_m / ax.farGate_m;
   if (diamFar_px < AXIAL_REJECT_PX){
     showAxialLowSignalNotice();
     return;
   }
-  var tNear = (1 / diamNear_px - b) / a;
-  var tFar = (1 / diamFar_px - b) / a;
+  // 回帰(a,b)は解析キャンバスpxのdiamで当てはめているため、ゲート通過時刻を求める際は
+  // ネイティブpxのdiamNear/Farを同じキャンバスpxへ換算(×scale)してから代入する。
+  // これを怠ると復元速度が 1/scale 倍(縮小した動画ほど過大)になる。
+  var diamNear_canvas = diamNear_px * ax.scale;
+  var diamFar_canvas = diamFar_px * ax.scale;
+  var tNear = (1 / diamNear_canvas - b) / a;
+  var tFar = (1 / diamFar_canvas - b) / a;
   var elapsed = Math.abs(tFar - tNear);
   if (!isFinite(elapsed) || elapsed <= 0) return;
 
@@ -1505,14 +1708,26 @@ function detectForeground(ctx, w, h){
   var bg = detect.bg;
   var thresh = 8 + (1 - detect.sensitivity) * 42;
   var preset = state.calib.ballColor;
+  // 生の動体(色フィルタ前)の画素数と重心を同じループ内で集計する(投球モーション連動用、追加コストはごくわずか)
+  var motionCount = 0, mSumX = 0, mSumY = 0, mx = 0, my = 0;
   for (i = 0, p = 0; i < n; i++, p += 4){
     var diff = Math.abs(luma[i] - bg[i]);
-    var isFg = diff > thresh;
+    var rawFg = diff > thresh;
+    if (rawFg){ motionCount++; mSumX += mx; mSumY += my; }
+    var isFg = rawFg;
     if (isFg && preset !== "auto"){
       isFg = colorMaskValue(data[p], data[p + 1], data[p + 2], preset);
     }
     mask[i] = isFg ? 1 : 0;
     bg[i] = bg[i] * (1 - BG_ALPHA) + luma[i] * BG_ALPHA;
+    mx++; if (mx === w){ mx = 0; my++; }
+  }
+  // 投球モーション連動は、投手全体が写る奥行きモードの解析キャンバスでのみ意味を持つ。
+  // 側面モードのコリドー(細い帯)には投手が写らず重心が無意味になるため、そちらでは一切使わない(=従来挙動)。
+  if (detect.motionAssist && detect.motion && state.session.shootMode === "axial"){
+    var mcx = motionCount > 0 ? mSumX / motionCount : null;
+    var mcy = motionCount > 0 ? mSumY / motionCount : null;
+    updateMotionModel(motionCount, mcx, mcy, n, state.detect._frameT);
   }
   return { mask: mask, shakeFlag: shakeFlag };
 }
@@ -1574,6 +1789,7 @@ function processFrameAxial(t){
 }
 
 function processFrame(t){
+  state.detect._frameT = t;
   if (state.session.shootMode === "axial"){
     processFrameAxial(t);
   } else {
@@ -1645,12 +1861,17 @@ function updateStopButtonLabel(){
 
 function updateMeasureFinePrint(){
   el.measureFinePrint.textContent = state.session.shootMode === "axial"
-    ? "正面/背面モードの表示速度は、ボールの見かけサイズの変化から回帰計算した推定値です(遠方ほど誤差が大きくなります)。薄く表示される数値は「低信頼」の測定です。"
+    ? "正面/背面モードの表示速度は、ボールの見かけサイズの変化から回帰計算した推定値です(遠方ほど誤差が大きくなります)。緑の破線は投球モーションから予測した白球の出所です。薄く表示される数値は「低信頼」の測定です。"
     : "側面〜斜めモードの表示速度は基準点間の平均速度です(区間内の減速は無視できる範囲として計算)。薄く表示される数値は「低信頼」の測定です。";
 }
 
 el.sensitivityInput.addEventListener("input", function(){
   state.detect.sensitivity = parseFloat(el.sensitivityInput.value);
+});
+
+el.motionAssistInput.addEventListener("change", function(){
+  state.detect.motionAssist = el.motionAssistInput.checked;
+  updateReleaseMarker();
 });
 
 el.btnExportCsv.addEventListener("click", exportCsv);
@@ -1684,7 +1905,8 @@ function backToStart(){
   state.dragging = null;
   state.displayRotation = 0;
   state.zoom = 1;
-  el.zoomInput.value = 1;
+  state.hwZoom = null;
+  resetZoomSlider();
   el.btnFlipRotation.hidden = true;
   el.fileControls.hidden = true;
   el.fpsBadge.hidden = true;
